@@ -4,7 +4,7 @@
 
 本项目参考并基于 [CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus) 与 [codex-api-hot-switch](https://github.com/BandengHu/codex-api-hot-switch) 的部分功能进行整合和完善，旨在把中转站监控、Codex 管理、供应商配置、模型热切换及常用增强集中到一个桌面工具中，让用户只需一个配套软件便能更轻松地配置和使用 Codex。
 
-完整操作说明见 [Codex_Ultura 使用手册](./docs/USER_MANUAL.md)。
+从 [GitHub Releases](https://github.com/CharlesWang505/Codex_Ultura/releases/latest) 下载最新版安装包，完整操作说明见 [Codex_Ultura 使用手册](./docs/USER_MANUAL.md)。
 
 ## 功能
 
