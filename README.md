@@ -1,107 +1,145 @@
 # Codex_Ultura
 
-基于 Tauri 2、Rust、React 19、TypeScript 与 Recharts 的桌面级 API 中转监控、Codex 管理和模型热切换软件，面向 New API、One API 与 OpenAI 兼容中转站。
+Codex_Ultura 是一款基于 Tauri 2、Rust、React 19 和 TypeScript 的 Windows 桌面工具，把 **New API / One API 账户监控、Codex 管理、8787 模型热切换和代理节点测速** 集中在一个应用中。
 
-本项目参考并基于 [CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus) 与 [codex-api-hot-switch](https://github.com/BandengHu/codex-api-hot-switch) 的部分功能进行整合和完善，旨在把中转站监控、Codex 管理、供应商配置、模型热切换及常用增强集中到一个桌面工具中，让用户只需一个配套软件便能更轻松地配置和使用 Codex。
+本项目参考并基于 [CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus) 与 [codex-api-hot-switch](https://github.com/BandengHu/codex-api-hot-switch) 的部分功能进行整合和完善，目标是让用户通过一个配套软件完成中转站查看、供应商配置、模型注入、热切换和常用 Codex 维护。
 
 从 [GitHub Releases](https://github.com/CharlesWang505/Codex_Ultura/releases/latest) 下载最新版安装包，完整操作说明见 [Codex_Ultura 使用手册](./docs/USER_MANUAL.md)。
 
-## 功能
+> **先记住这个隐藏按钮：左上角的闪电图标不是装饰。点击它可以启动 Codex；Codex 已在运行时，点击它会重启 Codex。** 重新生成模型目录或更新注入模型后，需要点击这个按钮让新目录生效。
 
-- 账户数据：当前余额、历史消耗、请求次数、账户分组与订阅额度。
-- 使用统计：真实 Tokens、成本、缓存创建、缓存命中、输入、输出与模型消耗分布。
-- 服务状态：站点状态、兼容模型接口、管理接口可用性与延迟。
-- 模型信息：当前模型分组、实时倍率、模型列表与定价兜底。
-- 令牌与日志：默认 Key 与扩展 Key 统一配置，多 Key 健康检测、令牌筛选、错误识别、调用日志与 CSV 导出。
-- 时间范围：今天、近 24 小时、近 7 天、近 30 天与自定义时间。
-- 代理测速：导入 Clash/Mihomo 订阅，通过每个代理节点批量测试多个 Base URL 的实时延迟，并可按任一路线正序或倒序排名。
-- 系统托盘：关闭窗口时可询问、隐藏到托盘或直接退出，托盘菜单支持恢复窗口和彻底退出。
+## 三个核心模块
 
-## 架构
+### 1. New API / One API 账户监控
 
-```text
-src/                    React 界面、数据归一化与分析逻辑
-src/features/proxyLatency/  代理订阅、节点筛选与延迟矩阵界面
-src/lib/desktop.ts      Tauri invoke 调用封装
-src-tauri/src/lib.rs    Rust HTTP 请求桥与敏感配置文件存储
-src-tauri/src/proxy_latency.rs  订阅解析、Mihomo 控制器与单节点 delay 客户端
-src-tauri/              Tauri 2 窗口、权限、图标与安装包配置
-```
+“概览”和“分析”主要针对 **New API、One API 及其兼容分支的管理接口**开发，可集中查看：
 
-所有跨域中转站请求都由 Rust `reqwest` 执行，前端不直接持有系统网络权限。
+- 当前余额、额度原值、历史消耗、请求次数和订阅额度。
+- 真实 Tokens、实际成本、缓存创建、缓存命中、输入和输出。
+- 使用趋势、模型消耗分布、分组倍率和模型倍率。
+- API Key 健康状态、调用日志、错误信息、首字延迟和 CSV 导出。
+- 站点接口、模型接口和管理接口的可用性。
 
-## 敏感信息
+只支持 `/v1/models`、`/v1/responses` 或 `/v1/chat/completions` 的普通 OpenAI 兼容站点，可能只能显示模型接口等部分数据。管理接口不可用但模型接口可用时，页面会显示“部分实时”或未知项，这不等于模型 API 本身不可用。
 
-站点名称、Base URL、API Key、扩展 Key、令牌名称、User ID、Cookie、登录账号和密码统一保存到系统应用数据目录的独立 `sensitive/sites.json` 文件。代理订阅 URL、Mihomo 控制器 Secret、测速目标和订阅节点名称保存在 `sensitive/proxy-latency.json`。这些数据不再写入浏览器 `localStorage`，也不会进入源码或安装包。
+### 2. Codex 管理与 8787 热切换
 
-Windows 下目录由 Tauri 的 `app_data_dir` 决定，通常位于当前用户的 AppData 目录。非敏感的关闭窗口偏好单独保存在 `settings/app-preferences.json`。账户余额、调用日志、IP、请求 ID、模型消耗与订阅数据只保存在运行内存，不会持久化到磁盘。
-
-## 关闭与托盘
-
-- 默认点击关闭按钮时询问：最小化到系统托盘、直接退出或取消。
-- 勾选“记住本次选择”后，下次关闭会直接执行对应操作。
-- 可在“设置 → 关闭窗口行为”中恢复为每次询问或改为其他行为。
-- 左键点击托盘图标恢复窗口；右键菜单可显示主窗口或退出软件。
-
-## 开发环境
-
-需要：
-
-- Node.js 20+
-- Rust stable
-- Windows 10/11 WebView2
-- Visual Studio 2022 C++ Build Tools 与 Windows SDK
-
-安装依赖：
-
-```bash
-npm install
-```
-
-运行 Tauri 桌面开发模式：
-
-```bash
-npm run dev:tauri
-```
-
-仅运行 React/Vite 页面：
-
-```bash
-npm run dev
-```
-
-浏览器模式用于界面开发，不提供持久化敏感配置；完整功能请使用 Tauri 模式。
-
-## 构建
-
-前端构建与类型检查：
-
-```bash
-npm run build
-```
-
-Tauri Windows 应用与安装包：
-
-```bash
-npm run build:tauri
-```
-
-只构建 NSIS 安装包：
-
-```bash
-npm run build:installer
-```
-
-主要输出位置：
+Codex_Ultura 可以管理多套上游 API 供应商和 Key，将选定模型注入 Codex，并通过本地网关实现模型路由：
 
 ```text
-src-tauri/target/release/codex-ultura.exe
-src-tauri/target/release/bundle/nsis/
+Codex
+  → http://127.0.0.1:8787/v1
+  → Codex 模型别名 / 映射规则
+  → 首选或备用供应商
+  → 上游真实模型
 ```
+
+主要能力：
+
+- OpenAI Responses、OpenAI Chat Completions、Anthropic 原生和 Gemini 原生协议。
+- 自动获取供应商模型，一次选择多个供应商生成 Codex 模型目录。
+- Codex 模型别名、上游真实模型、首选供应商、备用顺序和 Reasoning 覆盖。
+- 首选供应商失败后按映射顺序切换备用供应商。
+- 统一管理 `自动 / 关闭 / low / medium / high / xhigh` 推理强度。
+- 悬浮球和快速切换面板。
+- 会话、MCP、Skills、Plugins、Codex 增强和脚本市场。
+
+8787 网关默认关闭。网关运行时，供应商的 Base URL、协议和 Key 会被锁定，避免运行中的路由配置被改坏；先关闭热切换即可继续编辑。
+
+### 3. 代理测速
+
+代理测速用于回答一个很实际的问题：**同一个 API 中转站，经过哪个 Clash/Mihomo 节点访问最快、最稳定？**
+
+它支持：
+
+- 连接 Clash Verge、Mihomo 命名管道或 HTTP External Controller。
+- 没有外部 Clash 时安装并使用独立的内置 Mihomo 测试引擎。
+- 导入一个或多个代理订阅并选择参与测速的机场。
+- 同时测试多个 Base URL，生成“节点 × Base URL”延迟矩阵。
+- 按平均延迟、成功目标数或某一个 Base URL 的延迟排序。
+- 加入本地直连作为基准，并导出 CSV。
+
+测速不会切换 Clash 当前节点，也不会修改 Windows 系统代理。
+
+## 快速开始
+
+### 顶部闪电按钮
+
+软件左上角的粉色闪电图标是 Codex 启动按钮：
+
+- Codex 未运行：点击后启动 Codex。
+- Codex 已运行：点击后重启 Codex。
+- 重新生成模型目录或更新注入模型后：点击它重启 Codex，使新模型菜单生效。
+
+如果点击后没有反应，先在“设置 → Codex 路径与启动”中检查 Codex/ChatGPT 程序路径。
+
+### 配置 New API / One API 概览
+
+1. 打开“设置”，新增或选择监控站点。
+2. 填写站点名称、Base URL，以及该站点需要的 Cookie、User ID、API Key 或登录信息。
+3. 保存配置；需要 Cookie 的站点可使用“登录获取 Cookie”。
+4. 返回“概览”，选择时间范围后点击“手动刷新”。
+
+这里的“监控站点”和 Codex 的“API 供应商”是两套用途不同的数据：
+
+| 类型 | 主要字段 | 用途 |
+| --- | --- | --- |
+| 监控站点 | Base URL、Cookie、User ID、登录信息 | 读取余额、额度、日志、Token、分组和倍率 |
+| API 供应商 | Base URL、API Key、协议、模型列表 | 发送真实模型请求、写入 Codex、参与 8787 热切换 |
+
+同一个 New API 站点可以只建立一个监控站点，同时为不同分组的多个 Key 建立多个 API 供应商。
+
+### 配置 8787 热切换
+
+1. 在“供应商配置”中为每个上游或 Key 建立独立供应商。
+2. 填写协议、Base URL 和 Key，点击“获取模型”，选择默认模型后点击“仅保存”。
+3. 进入“热切换”，勾选需要出现在 Codex 模型菜单中的供应商。
+4. 点击“重新生成并更新 Codex”，生成完整模型目录。
+5. 检查模型映射中的别名、上游真实模型、首选供应商、备用供应商和 Reasoning。
+6. 点击“保存配置”或“应用并开启”，让 Codex 使用 `http://127.0.0.1:8787/v1`。
+7. 点击左上角闪电图标重启 Codex，再在 Codex 模型菜单中选择已注入模型。
+
+“重新生成并更新 Codex”会以当前勾选的供应商为准完整更新注入集合。取消勾选的供应商及其旧模型会从 Codex 菜单中移除。
+
+协议选择原则：
+
+- 中转站提供 `/v1/responses` 或 `/v1/chat/completions`：选择相应 OpenAI 兼容协议，即使背后实际是 Claude、Gemini 或 Grok。
+- 直连 Anthropic `/v1/messages`：选择 Anthropic 原生协议。
+- 直连 Gemini `generateContent`：选择 Gemini 原生协议。
+- Grok 官方 API 通常按 OpenAI 兼容方式配置。
+
+### 配置代理测速
+
+1. 打开“代理测速”。
+2. 使用“自动发现”连接 Clash/Mihomo；没有外部客户端时，先添加订阅，再点击内置引擎的“安装并启用”。
+3. 填写订阅名称和订阅 URL，点击“导入并解析节点”，选择参与测速的机场。
+4. 加入当前站点、全部站点或自定义 Base URL；目标不需要填写 API Key。
+5. 建议先启用“包含本地直连”，并发设置为 4～8。
+6. 点击“开始测速”，在矩阵中比较平均延迟、成功目标数和各 Base URL 单列结果。
+
+不同节点访问不同中转站的表现可能完全不同。只看平均值可能掩盖某个站点失败，建议结合“成功目标数”并点击目标表头做单列排序。
+
+## 功能全览
+
+- 概览：账户、订阅、余额、真实 Token、实际成本、趋势、倍率、健康状态和调用日志。
+- 分析：使用汇总、模型与时间分布、自动建议。
+- 供应商配置：多供应商、多 Key、协议、模型获取、测试、聚合供应商和 Codex 配置应用。
+- 热切换：8787 网关、模型注入、自动路由、映射规则、故障切换、Reasoning 和悬浮切换。
+- 会话管理：搜索、筛选、打开、删除、备份和历史 Provider 修复。
+- 工具与插件：MCP、Skills、Plugins 以及插件市场维护。
+- Codex 增强：页面增强、Stepwise 分步处理和图片覆盖层。
+- 脚本市场：市场脚本与本地脚本安装、更新、启停和校验。
+- 代理测速：订阅、Mihomo 控制器、内置引擎、延迟矩阵和 CSV。
+- 设置：站点、Codex 路径、Watcher、诊断、数据清理、版本和关于。
+- 系统托盘：隐藏、恢复和彻底退出。
+
+## 时间与刷新
+
+概览支持今天、近 24 小时、近 7 天、近 30 天和自定义时间。手动或自动刷新会使用点击刷新时的最新结束时间；自定义时间保持用户指定的固定范围。
 
 ## 接口策略
 
-应用会按站点能力并行尝试：
+应用会根据站点能力并行尝试：
 
 - `/api/user/self`
 - `/api/log/self/stat`
@@ -115,42 +153,69 @@ src-tauri/target/release/bundle/nsis/
 - `/v1/models`
 - `/api/models`
 
-当部分管理接口不可用但兼容模型接口可用时，应用以“部分实时”模式展示可用数据。
+不同 New API / One API 分支的接口和权限可能不同，应用会对可用结果进行归一化，而不是要求每个站点实现全部接口。
 
-## 代理测速
+## 数据与安全
 
-1. 可以连接 Clash Verge、Mihomo 或其他启用了 External Controller 的 Clash Meta 客户端；没有 Clash 时，可在控制器区域点击“安装并启用”使用内置测试引擎。
-2. 打开“代理测速”，默认会尝试连接 Windows 命名管道 `\\.\pipe\verge-mihomo`，也可以自动发现、填写 HTTP 控制器或启动内置引擎。
-3. 粘贴代理订阅 URL。软件只保存订阅地址和节点名称，不保存订阅原文中的节点协议凭据。
-4. 加入当前站点、全部已配置站点或自定义 Base URL。
-5. 点击“开始测速”，软件会调用 Mihomo 的 `/proxies/{节点}/delay`，并发测试全部节点与目标，不会切换当前代理。
+站点名称、Base URL、API Key、扩展 Key、令牌名称、User ID、Cookie、登录账号和密码保存在系统应用数据目录的 `sensitive/sites.json`。代理订阅 URL、Mihomo 控制器 Secret、测速目标和订阅节点名称保存在 `sensitive/proxy-latency.json`。
 
-如果控制器启用了 Secret，请在控制器区域填写；Secret 仅保存在独立敏感配置文件中。
+这些数据不会写入公开源码目录或安装包。账户余额、调用日志、IP、请求 ID、模型消耗和订阅数据只保存在运行内存，不持久化到磁盘。
 
-内置测试引擎只在用户明确操作后从 MetaCubeX 官方 GitHub 下载独立 Mihomo 核心，不修改系统代理。第三方许可证说明见 [docs/THIRD_PARTY_NOTICES.md](./docs/THIRD_PARTY_NOTICES.md)。
+公开 Issue、日志或截图前，仍应人工移除真实域名、Key、Cookie、订阅 URL、请求 ID、IP、余额和账户信息。
 
-## 版本与变更日志
+## 架构
 
-项目采用语义化版本号 `主版本.次版本.修订版本`，完整记录见 [CHANGELOG.md](./CHANGELOG.md)。
+```text
+src/                                  React 界面、数据归一化与分析逻辑
+src/features/proxyLatency/            代理订阅、节点筛选与延迟矩阵
+src/lib/desktop.ts                    Tauri invoke 调用封装
+src-tauri/src/lib.rs                  Rust HTTP 桥与敏感配置存储
+src-tauri/src/proxy_latency.rs        订阅解析、Mihomo 控制器与延迟测试
+src-tauri/crates/codex-plus/          Codex 管理、模型目录与 8787 网关
+src-tauri/                            Tauri 2 窗口、权限、托盘与安装配置
+```
 
-每次完成代码或界面修改时必须：
+跨域中转站请求由 Rust `reqwest` 执行，前端不直接持有系统网络权限。
 
-1. 在 `CHANGELOG.md` 顶部增加本次版本记录，说明新增、变更与修复内容。
-2. 修复和小范围优化递增修订版本，新增功能递增次版本，不兼容变更递增主版本。
-3. 同步 `package.json` 与 `src-tauri/Cargo.toml`；Tauri 安装包版本自动读取 `package.json`。
-4. 重新执行构建、lint、Rust 检查，并生成对应版本的 EXE 与安装包。
+## 开发与构建
 
-## 开源许可证
+环境要求：
 
-Codex_Ultura 以 [GNU Affero General Public License v3.0](./LICENSE) 发布，SPDX 标识为 `AGPL-3.0-only`。
+- Node.js 20+
+- Rust stable
+- Windows 10/11 WebView2
+- Visual Studio 2022 C++ Build Tools 与 Windows SDK
 
-本项目包含并修改了 [CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus) 的部分代码。分发修改后的程序，或通过网络向用户提供修改后的版本时，必须按照 AGPLv3 向相应用户提供完整对应源代码。OpenAI、ChatGPT、Codex 及其他第三方名称和商标归各自权利人所有。
+```bash
+npm install
+npm run dev:tauri
+```
 
-详细来源与第三方组件说明见 [NOTICE.md](./NOTICE.md) 和 [docs/THIRD_PARTY_NOTICES.md](./docs/THIRD_PARTY_NOTICES.md)。
+仅预览 React 界面可运行 `npm run dev`，但浏览器模式不提供敏感配置持久化、Codex 管理、8787 网关或真实代理测速。
 
-## 开源前检查
+```bash
+npm run build
+npm run build:tauri
+```
 
-- 不提交 AppData 下的 `sensitive/` 目录。
+主要输出：
+
+```text
+src-tauri/target/release/codex-ultura.exe
+src-tauri/target/release/bundle/nsis/
+```
+
+## 版本与许可证
+
+完整版本记录见 [CHANGELOG.md](./CHANGELOG.md)，第三方组件与来源见 [NOTICE.md](./NOTICE.md) 和 [docs/THIRD_PARTY_NOTICES.md](./docs/THIRD_PARTY_NOTICES.md)。
+
+Codex_Ultura 以 [GNU Affero General Public License v3.0](./LICENSE) 发布，SPDX 标识为 `AGPL-3.0-only`。本项目包含并修改了 CodexPlusPlus 的部分代码，分发修改后的程序或通过网络提供修改后的版本时，必须遵守 AGPLv3 的对应源代码提供要求。
+
+OpenAI、ChatGPT、Codex 以及其他第三方名称和商标归各自权利人所有。
+
+## 开源提交前检查
+
+- 不提交 AppData 下的 `sensitive/`、`codex/` 或个人配置目录。
 - 不提交 `dist/`、`release/`、`src-tauri/target/` 或个人截图。
-- 示例数据只能使用 `example.com`、文档保留 IP 段和虚构账号。
-- README、Issue、日志与截图中不要出现完整或掩码 API Key、Cookie、请求 ID、真实余额和私有站点域名。
+- 示例只能使用 `example.com`、文档保留 IP 段和虚构账号。
+- README、Issue、日志和截图中不要出现完整或掩码 Key、Cookie、订阅 URL、请求 ID、真实余额或私人站点域名。
