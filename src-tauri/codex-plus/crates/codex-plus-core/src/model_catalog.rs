@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::settings::{RelayProfile, SettingsStore};
+use crate::settings::{BackendSettings, RelayProfile, SettingsStore};
 use serde_json::{Value, json};
 
 const BASE_URL_ENV_KEYS: &[&str] = &[
@@ -39,12 +39,25 @@ pub async fn read_codex_model_catalog() -> Value {
     let settings_path = crate::paths::default_settings_path();
     if settings_path.exists() {
         if let Ok(settings) = SettingsStore::new(settings_path).load() {
+            if settings.hot_switch_enabled
+                && settings.hot_switch_model_routing_enabled
+                && !settings.hot_switch_model_mappings.is_empty()
+            {
+                let catalog = hot_switch_model_catalog_value(&home, &settings);
+                if catalog
+                    .get("models")
+                    .and_then(Value::as_array)
+                    .is_some_and(|models| !models.is_empty())
+                {
+                    return catalog;
+                }
+            }
             let profile = settings.active_relay_profile();
             let catalog = relay_profile_model_catalog_value(&home, &profile);
             if catalog
                 .get("models")
                 .and_then(Value::as_array)
-                .map_or(false, |m| !m.is_empty())
+                .is_some_and(|models| !models.is_empty())
             {
                 return catalog;
             }
@@ -63,6 +76,7 @@ pub async fn read_codex_model_catalog() -> Value {
                 "provider_name": "",
                 "default_model": "",
                 "models": [],
+                "excluded_models": [],
                 "sources": [],
                 "responses_api": responses_api_status("unknown", "", "")
             });
@@ -89,6 +103,7 @@ fn relay_profile_model_catalog_value(home: &Path, profile: &RelayProfile) -> Val
         "provider_name": provider_name,
         "default_model": default_model,
         "models": models,
+        "excluded_models": [],
         "sources": [
             {
                 "id": format!("relay-profile:{}", profile.id),
@@ -100,6 +115,90 @@ fn relay_profile_model_catalog_value(home: &Path, profile: &RelayProfile) -> Val
                 "responses_api": responses_api_status("unknown", "", "")
             }
         ],
+        "responses_api": responses_api_status("unknown", "", "")
+    })
+}
+
+fn hot_switch_model_catalog_value(home: &Path, settings: &BackendSettings) -> Value {
+    let models = unique_strings(
+        settings
+            .hot_switch_model_mappings
+            .iter()
+            .map(|mapping| mapping.model.trim().to_string())
+            .collect(),
+    );
+    let active_models = models.iter().cloned().collect::<HashSet<_>>();
+    let selected_relay_ids = unique_strings(
+        settings
+            .hot_switch_model_mappings
+            .iter()
+            .flat_map(|mapping| {
+                std::iter::once(mapping.relay_id.clone())
+                    .chain(mapping.candidate_relay_ids.iter().cloned())
+                    .chain(mapping.fallback_relay_ids.iter().cloned())
+            })
+            .collect(),
+    );
+    let selected_relay_id_set = selected_relay_ids.iter().cloned().collect::<HashSet<_>>();
+    let excluded_models = unique_strings(
+        settings
+            .relay_profiles
+            .iter()
+            .filter(|profile| !selected_relay_id_set.contains(profile.id.trim()))
+            .flat_map(relay_profile_model_ids)
+            .filter(|model| !active_models.contains(model))
+            .collect(),
+    );
+    let requested_model = settings.hot_switch_model.trim();
+    let default_model = if active_models.contains(requested_model) {
+        requested_model.to_string()
+    } else {
+        models.first().cloned().unwrap_or_default()
+    };
+    let sources = settings
+        .relay_profiles
+        .iter()
+        .filter(|profile| selected_relay_id_set.contains(profile.id.trim()))
+        .map(|profile| {
+            let provider_name = if profile.name.trim().is_empty() {
+                profile.id.trim()
+            } else {
+                profile.name.trim()
+            };
+            let mapped_models = settings
+                .hot_switch_model_mappings
+                .iter()
+                .filter(|mapping| {
+                    mapping.relay_id.trim() == profile.id.trim()
+                        || mapping
+                            .candidate_relay_ids
+                            .iter()
+                            .chain(mapping.fallback_relay_ids.iter())
+                            .any(|relay_id| relay_id.trim() == profile.id.trim())
+                })
+                .count();
+            json!({
+                "id": format!("relay-profile:{}", profile.id),
+                "type": "hot_switch_relay_profile",
+                "name": provider_name,
+                "base_url": profile.base_url.trim(),
+                "status": "ok",
+                "models": mapped_models,
+                "responses_api": responses_api_status("unknown", "", "")
+            })
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "status": if models.is_empty() { "not_configured" } else { "ok" },
+        "path": home.join("config.toml").to_string_lossy(),
+        "model": default_model,
+        "model_provider": "codex-plus-hot-switch",
+        "provider_name": "8787 热切换",
+        "default_model": default_model,
+        "models": models,
+        "excluded_models": excluded_models,
+        "sources": sources,
         "responses_api": responses_api_status("unknown", "", "")
     })
 }
@@ -149,6 +248,7 @@ pub async fn read_codex_model_catalog_from_home(
             "provider_name": provider_name,
             "default_model": "",
             "models": [],
+            "excluded_models": [],
             "sources": [],
             "responses_api": responses_api_status("unknown", "", "")
         });
@@ -212,6 +312,7 @@ pub async fn read_codex_model_catalog_from_home(
         "provider_name": provider_name,
         "default_model": default_model,
         "models": models,
+        "excluded_models": [],
         "sources": source_statuses,
         "responses_api": responses_api
     })
@@ -847,6 +948,7 @@ fn unquote_toml_string(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::HotSwitchModelMapping;
 
     #[test]
     fn relay_profile_model_source_recovers_saved_key_for_frontend_profile() {
@@ -892,5 +994,75 @@ base_url = "http://127.0.0.1:58321/v1"
 
         assert_eq!(source.base_url, "https://anthropic.example");
         assert_eq!(source.api_key, "sk-anthropic");
+    }
+
+    #[test]
+    fn hot_switch_catalog_uses_all_mappings_and_excludes_unselected_provider_models() {
+        let mut settings = BackendSettings {
+            hot_switch_enabled: true,
+            hot_switch_model_routing_enabled: true,
+            hot_switch_model: "removed-old-model".to_string(),
+            relay_profiles: vec![
+                RelayProfile {
+                    id: "chatgpt".to_string(),
+                    name: "ChatGPT".to_string(),
+                    model_list: "gpt-5\ngpt-shared".to_string(),
+                    ..RelayProfile::default()
+                },
+                RelayProfile {
+                    id: "claude".to_string(),
+                    name: "Claude".to_string(),
+                    model_list: "claude-opus".to_string(),
+                    ..RelayProfile::default()
+                },
+                RelayProfile {
+                    id: "grok".to_string(),
+                    name: "Grok".to_string(),
+                    model_list: "grok-4\ngpt-shared".to_string(),
+                    ..RelayProfile::default()
+                },
+            ],
+            ..BackendSettings::default()
+        };
+        settings.hot_switch_model_mappings = vec![
+            HotSwitchModelMapping {
+                model: "gpt-5".to_string(),
+                upstream_model: "gpt-5".to_string(),
+                relay_id: "chatgpt".to_string(),
+                ..HotSwitchModelMapping::default()
+            },
+            HotSwitchModelMapping {
+                model: "claude-opus".to_string(),
+                upstream_model: "claude-opus".to_string(),
+                relay_id: "claude".to_string(),
+                ..HotSwitchModelMapping::default()
+            },
+            HotSwitchModelMapping {
+                model: "gpt-shared".to_string(),
+                upstream_model: "gpt-shared".to_string(),
+                relay_id: "chatgpt".to_string(),
+                ..HotSwitchModelMapping::default()
+            },
+        ];
+
+        let catalog = hot_switch_model_catalog_value(Path::new("C:/Users/test/.codex"), &settings);
+        let models = catalog["models"]
+            .as_array()
+            .expect("hot-switch models")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        let excluded_models = catalog["excluded_models"]
+            .as_array()
+            .expect("excluded models")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+
+        assert_eq!(models, vec!["gpt-5", "claude-opus", "gpt-shared"]);
+        assert_eq!(excluded_models, vec!["grok-4"]);
+        assert_eq!(catalog["model"], "gpt-5");
+        assert_eq!(catalog["default_model"], "gpt-5");
+        assert_eq!(catalog["model_provider"], "codex-plus-hot-switch");
     }
 }

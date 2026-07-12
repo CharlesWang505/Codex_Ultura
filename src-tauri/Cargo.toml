@@ -38,7 +38,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [package]
 name = "codex-ultura"
-version = "1.2.8"
+version = "1.2.10"
 description = "Codex_Ultura: API relay monitor, Codex manager, and hot-switch desktop gateway."
 authors = ["Codex_Ultura"]
 license = "AGPL-3.0-only"

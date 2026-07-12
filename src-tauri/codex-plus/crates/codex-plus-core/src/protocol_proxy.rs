@@ -1231,18 +1231,317 @@ fn gemini_to_chat_completion(payload: Value, model: String) -> Value {
 }
 
 pub fn completed_response_to_sse(response: &Value) -> Vec<u8> {
+    let mut output = String::new();
     let mut created = response.clone();
     if let Some(record) = created.as_object_mut() {
         record.insert("status".into(), json!("in_progress"));
         record.insert("output".into(), json!([]));
         record.insert("output_text".into(), json!(""));
     }
-    let created_event = json!({ "type": "response.created", "response": created });
-    let completed_event = json!({ "type": "response.completed", "response": response });
-    format!(
-        "event: response.created\ndata: {created_event}\n\nevent: response.completed\ndata: {completed_event}\n\ndata: [DONE]\n\n"
-    )
-    .into_bytes()
+    push_sse(
+        &mut output,
+        "response.created",
+        json!({ "type": "response.created", "response": created }),
+    );
+    push_sse(
+        &mut output,
+        "response.in_progress",
+        json!({ "type": "response.in_progress", "response": created }),
+    );
+
+    if let Some(items) = response.get("output").and_then(Value::as_array) {
+        for (output_index, item) in items.iter().enumerate() {
+            let output_index = output_index as u32;
+            match item.get("type").and_then(Value::as_str).unwrap_or_default() {
+                "message" => push_completed_message_sse(&mut output, item, output_index),
+                "reasoning" => push_completed_reasoning_sse(&mut output, item, output_index),
+                "function_call" | "custom_tool_call" => {
+                    push_completed_tool_call_sse(&mut output, item, output_index)
+                }
+                _ => {
+                    push_sse(
+                        &mut output,
+                        "response.output_item.added",
+                        json!({
+                            "type": "response.output_item.added",
+                            "output_index": output_index,
+                            "item": item
+                        }),
+                    );
+                    push_sse(
+                        &mut output,
+                        "response.output_item.done",
+                        json!({
+                            "type": "response.output_item.done",
+                            "output_index": output_index,
+                            "item": item
+                        }),
+                    );
+                }
+            }
+        }
+    }
+
+    push_sse(
+        &mut output,
+        "response.completed",
+        json!({ "type": "response.completed", "response": response }),
+    );
+    output.push_str("data: [DONE]\n\n");
+    output.into_bytes()
+}
+
+fn push_completed_message_sse(output: &mut String, item: &Value, output_index: u32) {
+    let item_id = item
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("resp_compat_msg");
+    let mut added_item = item.clone();
+    if let Some(record) = added_item.as_object_mut() {
+        record.insert("status".into(), json!("in_progress"));
+        record.insert("content".into(), json!([]));
+    }
+    push_sse(
+        output,
+        "response.output_item.added",
+        json!({
+            "type": "response.output_item.added",
+            "output_index": output_index,
+            "item": added_item
+        }),
+    );
+
+    if let Some(parts) = item.get("content").and_then(Value::as_array) {
+        for (content_index, part) in parts.iter().enumerate() {
+            let content_index = content_index as u32;
+            let part_type = part.get("type").and_then(Value::as_str).unwrap_or_default();
+            if part_type != "output_text" {
+                continue;
+            }
+            let text = part.get("text").and_then(Value::as_str).unwrap_or_default();
+            push_sse(
+                output,
+                "response.content_part.added",
+                json!({
+                    "type": "response.content_part.added",
+                    "item_id": item_id,
+                    "output_index": output_index,
+                    "content_index": content_index,
+                    "part": { "type": "output_text", "text": "", "annotations": [] }
+                }),
+            );
+            if !text.is_empty() {
+                push_sse(
+                    output,
+                    "response.output_text.delta",
+                    json!({
+                        "type": "response.output_text.delta",
+                        "item_id": item_id,
+                        "output_index": output_index,
+                        "content_index": content_index,
+                        "delta": text
+                    }),
+                );
+            }
+            push_sse(
+                output,
+                "response.output_text.done",
+                json!({
+                    "type": "response.output_text.done",
+                    "item_id": item_id,
+                    "output_index": output_index,
+                    "content_index": content_index,
+                    "text": text
+                }),
+            );
+            push_sse(
+                output,
+                "response.content_part.done",
+                json!({
+                    "type": "response.content_part.done",
+                    "item_id": item_id,
+                    "output_index": output_index,
+                    "content_index": content_index,
+                    "part": part
+                }),
+            );
+        }
+    }
+
+    push_sse(
+        output,
+        "response.output_item.done",
+        json!({
+            "type": "response.output_item.done",
+            "output_index": output_index,
+            "item": item
+        }),
+    );
+}
+
+fn push_completed_reasoning_sse(output: &mut String, item: &Value, output_index: u32) {
+    let item_id = item
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("rs_resp_compat");
+    let reasoning_text = item
+        .get("reasoning_content")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            item.get("summary")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|part| part.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("")
+        });
+    push_sse(
+        output,
+        "response.output_item.added",
+        json!({
+            "type": "response.output_item.added",
+            "output_index": output_index,
+            "item": {
+                "id": item_id,
+                "type": "reasoning",
+                "status": "in_progress",
+                "reasoning_content": "",
+                "summary": []
+            }
+        }),
+    );
+    push_sse(
+        output,
+        "response.reasoning_summary_part.added",
+        json!({
+            "type": "response.reasoning_summary_part.added",
+            "item_id": item_id,
+            "output_index": output_index,
+            "summary_index": 0,
+            "part": { "type": "summary_text", "text": "" }
+        }),
+    );
+    if !reasoning_text.is_empty() {
+        push_sse(
+            output,
+            "response.reasoning_summary_text.delta",
+            json!({
+                "type": "response.reasoning_summary_text.delta",
+                "item_id": item_id,
+                "output_index": output_index,
+                "summary_index": 0,
+                "delta": reasoning_text
+            }),
+        );
+    }
+    push_sse(
+        output,
+        "response.reasoning_summary_text.done",
+        json!({
+            "type": "response.reasoning_summary_text.done",
+            "item_id": item_id,
+            "output_index": output_index,
+            "summary_index": 0,
+            "text": reasoning_text
+        }),
+    );
+    push_sse(
+        output,
+        "response.reasoning_summary_part.done",
+        json!({
+            "type": "response.reasoning_summary_part.done",
+            "item_id": item_id,
+            "output_index": output_index,
+            "summary_index": 0,
+            "part": { "type": "summary_text", "text": reasoning_text }
+        }),
+    );
+    push_sse(
+        output,
+        "response.output_item.done",
+        json!({
+            "type": "response.output_item.done",
+            "output_index": output_index,
+            "item": item
+        }),
+    );
+}
+
+fn push_completed_tool_call_sse(output: &mut String, item: &Value, output_index: u32) {
+    let item_id = item
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("fc_compat");
+    let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
+    let field = if item_type == "custom_tool_call" {
+        "input"
+    } else {
+        "arguments"
+    };
+    let value = item.get(field).and_then(Value::as_str).unwrap_or_default();
+    let mut added_item = item.clone();
+    if let Some(record) = added_item.as_object_mut() {
+        record.insert("status".into(), json!("in_progress"));
+        record.insert(field.into(), json!(""));
+    }
+    push_sse(
+        output,
+        "response.output_item.added",
+        json!({
+            "type": "response.output_item.added",
+            "output_index": output_index,
+            "item": added_item
+        }),
+    );
+    if item_type == "custom_tool_call" {
+        if !value.is_empty() {
+            push_sse(
+                output,
+                "response.custom_tool_call_input.delta",
+                json!({
+                    "type": "response.custom_tool_call_input.delta",
+                    "item_id": item_id,
+                    "output_index": output_index,
+                    "delta": value
+                }),
+            );
+        }
+    } else {
+        if !value.is_empty() {
+            push_sse(
+                output,
+                "response.function_call_arguments.delta",
+                json!({
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": item_id,
+                    "output_index": output_index,
+                    "delta": value
+                }),
+            );
+        }
+        push_sse(
+            output,
+            "response.function_call_arguments.done",
+            json!({
+                "type": "response.function_call_arguments.done",
+                "item_id": item_id,
+                "output_index": output_index,
+                "arguments": value
+            }),
+        );
+    }
+    push_sse(
+        output,
+        "response.output_item.done",
+        json!({
+            "type": "response.output_item.done",
+            "output_index": output_index,
+            "item": item
+        }),
+    );
 }
 
 fn validate_upstream(relay: &crate::settings::RelayProfile) -> anyhow::Result<()> {
@@ -4576,6 +4875,53 @@ mod hot_switch_tests {
         assert_eq!(converted["usage"]["total_tokens"], json!(3));
         let sse = String::from_utf8(completed_response_to_sse(&converted)).unwrap();
         assert!(sse.contains("response.created"));
+        assert!(sse.contains("response.output_item.added"));
+        assert!(sse.contains("response.content_part.added"));
+        assert!(sse.contains("response.output_text.delta"));
+        assert!(sse.contains(r#""delta":"world""#));
+        assert!(sse.contains("response.output_text.done"));
         assert!(sse.contains("response.completed"));
+    }
+
+    #[test]
+    fn completed_response_to_sse_emits_codex_text_sequence() {
+        let response = json!({
+            "id": "resp_anthropic",
+            "object": "response",
+            "created_at": 0,
+            "status": "completed",
+            "model": "claude-opus-4-8",
+            "output": [{
+                "id": "resp_anthropic_msg",
+                "type": "message",
+                "status": "completed",
+                "role": "assistant",
+                "content": [{
+                    "type": "output_text",
+                    "text": "测试成功",
+                    "annotations": []
+                }]
+            }],
+            "usage": { "input_tokens": 1, "output_tokens": 1, "total_tokens": 2 }
+        });
+
+        let sse = String::from_utf8(completed_response_to_sse(&response)).unwrap();
+
+        let created = sse.find("event: response.created").unwrap();
+        let item_added = sse.find("event: response.output_item.added").unwrap();
+        let part_added = sse.find("event: response.content_part.added").unwrap();
+        let delta = sse.find("event: response.output_text.delta").unwrap();
+        let text_done = sse.find("event: response.output_text.done").unwrap();
+        let item_done = sse.find("event: response.output_item.done").unwrap();
+        let completed = sse.find("event: response.completed").unwrap();
+
+        assert!(created < item_added);
+        assert!(item_added < part_added);
+        assert!(part_added < delta);
+        assert!(delta < text_done);
+        assert!(text_done < item_done);
+        assert!(item_done < completed);
+        assert!(sse.contains(r#""delta":"测试成功""#));
+        assert!(sse.ends_with("data: [DONE]\n\n"));
     }
 }

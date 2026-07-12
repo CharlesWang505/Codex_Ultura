@@ -4345,7 +4345,7 @@
     return Array.from(new Set(values.filter((value) => typeof value === "string" && value.trim().length > 0)));
   }
 
-  let codexModelCatalog = { status: "loading", model: "", default_model: "", model_provider: "", provider_name: "", models: [], sources: [], responses_api: { status: "unknown", message: "" } };
+  let codexModelCatalog = { status: "loading", model: "", default_model: "", model_provider: "", provider_name: "", models: [], excluded_models: [], sources: [], responses_api: { status: "unknown", message: "" } };
   let codexModelCatalogLoadedAt = 0;
   let codexModelCatalogPromise = null;
   let codexModelWhitelistRefreshTimer = 0;
@@ -4365,6 +4365,7 @@
           model_provider: "",
           provider_name: "",
           models: [],
+          excluded_models: [],
           sources: [],
           responses_api: { status: "unknown", message: "" },
           ...catalog,
@@ -4400,12 +4401,19 @@
     ]);
   }
 
+  function codexPlusExcludedModelNames() {
+    const activeModels = new Set(codexPlusModelNames());
+    return uniqueValues(
+      Array.isArray(codexModelCatalog.excluded_models) ? codexModelCatalog.excluded_models : [],
+    ).filter((modelName) => !activeModels.has(modelName));
+  }
+
   async function loadCodexModelCatalog(force = false) {
     if (!force && codexModelCatalogPromise) return codexModelCatalogPromise;
     if (!force && codexModelCatalogLoadedAt && Date.now() - codexModelCatalogLoadedAt < 10000) return codexModelCatalog;
     codexModelCatalogPromise = postJson("/codex-model-catalog", {})
       .then(async (result) => {
-        codexModelCatalog = result && typeof result === "object" ? result : { status: "failed", model: "", default_model: "", model_provider: "", provider_name: "", models: [], sources: [], responses_api: { status: "unknown", message: "" } };
+        codexModelCatalog = result && typeof result === "object" ? result : { status: "failed", model: "", default_model: "", model_provider: "", provider_name: "", models: [], excluded_models: [], sources: [], responses_api: { status: "unknown", message: "" } };
         if ((!codexModelCatalog.models || codexModelCatalog.models.length === 0) && codexModelCatalog.status === "not_configured") {
           try {
             const settingsPromise = postJson("/settings/get", {});
@@ -4433,7 +4441,7 @@
         return codexModelCatalog;
       })
       .catch((error) => {
-        codexModelCatalog = { status: "failed", message: String(error?.message || error), model: "", default_model: "", model_provider: "", provider_name: "", models: [], sources: [], responses_api: { status: "unknown", message: "" } };
+        codexModelCatalog = { status: "failed", message: String(error?.message || error), model: "", default_model: "", model_provider: "", provider_name: "", models: [], excluded_models: [], sources: [], responses_api: { status: "unknown", message: "" } };
         codexModelCatalogLoadedAt = Date.now();
         return codexModelCatalog;
       })
@@ -4475,8 +4483,15 @@
   function patchModelNameArray(models) {
     if (!stringArrayLooksPatchable(models)) return false;
     const customModels = codexPlusModelNames();
-    if (!customModels.length) return false;
+    const excludedModels = new Set(codexPlusExcludedModelNames());
+    if (!customModels.length && !excludedModels.size) return false;
     let changed = false;
+    for (let index = models.length - 1; index >= 0; index -= 1) {
+      if (excludedModels.has(models[index])) {
+        models.splice(index, 1);
+        changed = true;
+      }
+    }
     customModels.forEach((modelName) => {
       if (!models.includes(modelName)) {
         models.push(modelName);
@@ -4489,8 +4504,15 @@
   function patchModelArray(models, allowEmpty = false) {
     if (!modelArrayLooksPatchable(models, allowEmpty)) return false;
     const customModels = codexPlusModelNames();
-    if (!customModels.length) return false;
+    const excludedModels = new Set(codexPlusExcludedModelNames());
+    if (!customModels.length && !excludedModels.size) return false;
     let changed = false;
+    for (let index = models.length - 1; index >= 0; index -= 1) {
+      if (excludedModels.has(models[index].model)) {
+        models.splice(index, 1);
+        changed = true;
+      }
+    }
     const existing = new Map(models.map((item) => [item.model, item]));
     models.forEach((item) => {
       if (customModels.includes(item.model) && item.hidden !== false) {
@@ -4520,7 +4542,11 @@
     if (patchModelArray(value.message?.result?.data)) changed = true;
     if (patchModelArray(value.message?.result?.models)) changed = true;
     const names = codexPlusModelNames();
+    const excludedNames = codexPlusExcludedModelNames();
     if (value.availableModels instanceof Set) {
+      excludedNames.forEach((name) => {
+        if (value.availableModels.delete(name)) changed = true;
+      });
       names.forEach((name) => {
         if (!value.availableModels.has(name)) {
           value.availableModels.add(name);
@@ -4529,6 +4555,9 @@
       });
     }
     if (value.available_models instanceof Set) {
+      excludedNames.forEach((name) => {
+        if (value.available_models.delete(name)) changed = true;
+      });
       names.forEach((name) => {
         if (!value.available_models.has(name)) {
           value.available_models.add(name);
@@ -4537,20 +4566,10 @@
       });
     }
     if (Array.isArray(value.availableModels)) {
-      names.forEach((name) => {
-        if (!value.availableModels.includes(name)) {
-          value.availableModels.push(name);
-          changed = true;
-        }
-      });
+      if (patchModelNameArray(value.availableModels)) changed = true;
     }
     if (Array.isArray(value.available_models)) {
-      names.forEach((name) => {
-        if (!value.available_models.includes(name)) {
-          value.available_models.push(name);
-          changed = true;
-        }
-      });
+      if (patchModelNameArray(value.available_models)) changed = true;
     }
     if (Array.isArray(value.hiddenModels)) {
       const before = value.hiddenModels.length;
@@ -4601,10 +4620,12 @@
 
   function patchStatsigModelDynamicConfig(config) {
     const names = codexPlusModelNames();
+    const excludedNames = new Set(codexPlusExcludedModelNames());
     const value = config?.value;
-    if (!names.length || !value || typeof value !== "object") return config;
-    const availableModels = Array.isArray(value.available_models) ? [...value.available_models] : [];
-    let changed = false;
+    if ((!names.length && !excludedNames.size) || !value || typeof value !== "object") return config;
+    const originalAvailableModels = Array.isArray(value.available_models) ? value.available_models : [];
+    const availableModels = originalAvailableModels.filter((name) => !excludedNames.has(name));
+    let changed = availableModels.length !== originalAvailableModels.length;
     names.forEach((name) => {
       if (!availableModels.includes(name)) {
         availableModels.push(name);

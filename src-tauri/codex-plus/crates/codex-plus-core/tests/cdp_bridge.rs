@@ -560,6 +560,8 @@ fn injection_script_unlocks_custom_model_catalog() {
 
     assert!(script.contains("/codex-model-catalog"));
     assert!(script.contains("codexModelCatalog"));
+    assert!(script.contains("excluded_models"));
+    assert!(script.contains("codexPlusExcludedModelNames"));
     assert!(script.contains("patchModelArray"));
     assert!(script.contains("patchStatsigModelDynamicConfig"));
     assert!(script.contains("patchModelJsonResponse"));

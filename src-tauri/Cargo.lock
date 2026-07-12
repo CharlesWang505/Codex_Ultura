@@ -477,7 +477,7 @@ dependencies = [
 
 [[package]]
 name = "codex-ultura"
-version = "1.2.8"
+version = "1.2.10"
 dependencies = [
  "anyhow",
  "async-trait",
