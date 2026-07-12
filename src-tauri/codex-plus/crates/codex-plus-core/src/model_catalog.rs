@@ -513,21 +513,7 @@ fn responses_api_status(status: &str, endpoint: &str, message: &str) -> Value {
 pub async fn fetch_relay_profile_model_ids(
     profile: &RelayProfile,
 ) -> anyhow::Result<(Vec<String>, String)> {
-    let source = ModelSource {
-        source_id: format!("relay-profile:{}", profile.id),
-        source_type: "relay_profile".to_string(),
-        name: if profile.name.trim().is_empty() {
-            profile.id.clone()
-        } else {
-            profile.name.trim().to_string()
-        },
-        base_url: if profile.upstream_base_url.trim().is_empty() {
-            profile.base_url.trim().to_string()
-        } else {
-            profile.upstream_base_url.trim().to_string()
-        },
-        api_key: profile.api_key.trim().to_string(),
-    };
+    let source = relay_profile_model_source(profile);
     if source.base_url.is_empty() {
         anyhow::bail!("Base URL 不能为空");
     }
@@ -596,6 +582,20 @@ pub async fn fetch_relay_profile_model_ids(
         anyhow::bail!("{message}");
     }
     Ok((models, endpoint))
+}
+
+fn relay_profile_model_source(profile: &RelayProfile) -> ModelSource {
+    ModelSource {
+        source_id: format!("relay-profile:{}", profile.id),
+        source_type: "relay_profile".to_string(),
+        name: if profile.name.trim().is_empty() {
+            profile.id.clone()
+        } else {
+            profile.name.trim().to_string()
+        },
+        base_url: crate::relay_config::relay_profile_base_url(profile),
+        api_key: crate::relay_config::relay_profile_api_key(profile),
+    }
 }
 
 fn preferred_responses_api_status(sources: &[Value]) -> Value {
@@ -842,4 +842,55 @@ fn unquote_toml_string(value: &str) -> String {
         })
         .unwrap_or(value)
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relay_profile_model_source_recovers_saved_key_for_frontend_profile() {
+        let profile = RelayProfile {
+            id: "relay-a".to_string(),
+            name: "Relay A".to_string(),
+            relay_mode: crate::settings::RelayMode::PureApi,
+            protocol: crate::settings::RelayProtocol::Responses,
+            base_url: "https://".to_string(),
+            upstream_base_url: "https://relay.example/v1".to_string(),
+            api_key: String::new(),
+            auth_contents: r#"{"OPENAI_API_KEY":"sk-saved"}"#.to_string(),
+            ..RelayProfile::default()
+        };
+
+        let source = relay_profile_model_source(&profile);
+
+        assert_eq!(source.base_url, "https://relay.example/v1");
+        assert_eq!(source.api_key, "sk-saved");
+    }
+
+    #[test]
+    fn relay_profile_model_source_recovers_native_protocol_upstream_and_key() {
+        let profile = RelayProfile {
+            id: "anthropic-a".to_string(),
+            name: "Anthropic A".to_string(),
+            relay_mode: crate::settings::RelayMode::PureApi,
+            protocol: crate::settings::RelayProtocol::Anthropic,
+            base_url: "https://".to_string(),
+            upstream_base_url: "https://anthropic.example".to_string(),
+            api_key: String::new(),
+            auth_contents: r#"{"OPENAI_API_KEY":"sk-anthropic"}"#.to_string(),
+            config_contents: r#"model_provider = "custom"
+
+[model_providers.custom]
+base_url = "http://127.0.0.1:58321/v1"
+"#
+            .to_string(),
+            ..RelayProfile::default()
+        };
+
+        let source = relay_profile_model_source(&profile);
+
+        assert_eq!(source.base_url, "https://anthropic.example");
+        assert_eq!(source.api_key, "sk-anthropic");
+    }
 }

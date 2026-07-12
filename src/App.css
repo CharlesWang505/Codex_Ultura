@@ -158,6 +158,46 @@
   box-shadow: var(--shadow-surface);
 }
 
+.brand-restart {
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.brand-restart:hover:not(:disabled) {
+  color: white;
+  border-color: var(--accent-strong);
+  background: var(--accent);
+}
+
+.brand-restart:disabled {
+  cursor: wait;
+}
+
+.brand-restart.busy svg {
+  animation: spin .8s linear infinite;
+}
+
+.brand-restart.ok {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.brand-restart.error {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.brand-restart-status {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.brand-restart-status.ok { color: var(--ok); }
+.brand-restart-status.error { color: var(--danger); }
+
 .app-body {
   position: relative;
   z-index: 1;
@@ -2383,7 +2423,7 @@ td {
 .usage-log-table th:nth-child(9) { width: 105px; }
 .usage-log-table th:nth-child(10) { width: 76px; }
 .usage-log-table th:nth-child(11) { width: 100px; }
-.usage-log-table th:nth-child(12) { width: 112px; }
+.usage-log-table th:nth-child(12) { width: 132px; }
 .usage-log-table th:nth-child(13) { width: 55px; }
 
 th {
@@ -2452,6 +2492,9 @@ td:nth-child(5) {
 }
 
 .timing-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   min-width: 0;
   padding: 2px 6px;
   border: 1px solid var(--border-soft);
@@ -2460,6 +2503,14 @@ td:nth-child(5) {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
+}
+
+.timing-badge i {
+  color: currentColor;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 650;
+  opacity: 0.68;
 }
 
 .timing-good {

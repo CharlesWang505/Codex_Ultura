@@ -62,7 +62,7 @@ export function ModelMappingEditor({
       {mappings.length ? (
         <div className="codex-mapping-cards">
           {mappings.map((mapping, index) => (
-            <article key={`${mapping.model}-${index}`} className={(validation.rowErrors[index]?.length ?? 0) > 0 ? 'invalid' : ''}>
+            <article key={index} className={(validation.rowErrors[index]?.length ?? 0) > 0 ? 'invalid' : ''}>
               <header><strong>规则 {index + 1}</strong><button type="button" aria-label={`删除映射规则 ${index + 1}`} disabled={operationBusy} onClick={() => onChange(mappings.filter((_, itemIndex) => itemIndex !== index))}><Trash2 size={14} />删除</button></header>
               <div className="codex-form-grid">
                 <CodexField label="Codex 模型 / 别名"><input value={mapping.model} disabled={operationBusy} onChange={(event) => update(index, { model: event.target.value })} /></CodexField>

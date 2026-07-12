@@ -6,8 +6,48 @@
 }
 
 .codex-hot-switch-page > .mapping-panel { grid-column: 1 / -1; }
+.codex-hot-switch-page > .injection-panel { grid-column: 1 / -1; }
 .codex-hot-switch-page .codex-panel > header,
 .codex-hot-switch-page .codex-inline-actions { flex-wrap: wrap; }
+
+.codex-injection-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.codex-injection-intro > div { display: grid; gap: 5px; }
+.codex-injection-intro span { color: var(--text-muted); font-size: 12px; line-height: 1.65; }
+
+.codex-injection-profiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.codex-injection-profiles label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  background: var(--bg-panel-soft);
+  cursor: pointer;
+}
+
+.codex-injection-profiles label.selected {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-panel-soft));
+}
+
+.codex-injection-profiles label > span { display: grid; min-width: 0; gap: 2px; }
+.codex-injection-profiles strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.codex-injection-profiles small { color: var(--text-faint); }
 
 .codex-hot-switch-error,
 .codex-mapping-errors,
@@ -78,5 +118,6 @@
 @media (max-width: 1120px) {
   .codex-hot-switch-page,
   .codex-mapping-cards { grid-template-columns: 1fr; }
-  .codex-hot-switch-page > .mapping-panel { grid-column: auto; }
+  .codex-hot-switch-page > .mapping-panel,
+  .codex-hot-switch-page > .injection-panel { grid-column: auto; }
 }

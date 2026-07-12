@@ -1575,8 +1575,7 @@ fn apply_model_catalog_to_config(
         };
     let entries =
         crate::model_suffix::collect_catalog_entries(&model_list, &model_windows, &profile.model);
-    // 无后缀条目则 no-op，保持现有 per-profile 单值行为（保 does_not_write 测试）
-    if !entries.iter().any(|entry| entry.suffix_window.is_some()) {
+    if entries.is_empty() {
         return Ok(config_text.to_string());
     }
     let fallback = parse_optional_positive_u64(&profile.context_window, "上下文大小")?;
@@ -2002,10 +2001,18 @@ pub fn relay_profile_base_url(profile: &RelayProfile) -> String {
             crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
         );
     }
+    let local_protocol_proxy = crate::protocol_proxy::local_responses_proxy_base_url(
+        crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
+    );
+    let saved_upstream_base_url = profile.upstream_base_url.trim();
+    if !saved_upstream_base_url.is_empty()
+        && saved_upstream_base_url != "https://"
+        && saved_upstream_base_url != "http://"
+        && saved_upstream_base_url != local_protocol_proxy.as_str()
+    {
+        return saved_upstream_base_url.to_string();
+    }
     if profile.protocol == RelayProtocol::ChatCompletions {
-        if !profile.upstream_base_url.trim().is_empty() {
-            return profile.upstream_base_url.trim().to_string();
-        }
         if let Some(value) = root_key_string(&profile.config_contents, CHAT_UPSTREAM_BASE_URL_KEY)
             .filter(|value| !value.trim().is_empty())
         {
@@ -2014,6 +2021,14 @@ pub fn relay_profile_base_url(profile: &RelayProfile) -> String {
         if !profile.base_url.trim().is_empty() {
             return profile.base_url.trim().to_string();
         }
+    }
+    let edited_base_url = profile.base_url.trim();
+    if !edited_base_url.is_empty()
+        && edited_base_url != "https://"
+        && edited_base_url != "http://"
+        && edited_base_url != local_protocol_proxy.as_str()
+    {
+        return edited_base_url.to_string();
     }
     let provider_base_url = provider_string_from_config(&profile.config_contents, "base_url")
         .filter(|value| !value.trim().is_empty())
@@ -2058,7 +2073,11 @@ fn complete_relay_profile_config(profile: &RelayProfile) -> anyhow::Result<Strin
     let provider_id = active_or_default_provider_id(&doc);
     set_provider_id(&mut doc, &provider_id);
 
-    let mut model = relay_profile_model(profile);
+    let mut model = if !profile.model.trim().is_empty() {
+        profile.model.trim().to_string()
+    } else {
+        relay_profile_model(profile)
+    };
     // 若用户未填写默认模型，但 model_list 有内容，则取第一条作为默认 model，
     // 避免 codex 启动时回退到历史会话中带后缀的模型名。
     if model.trim().is_empty() && !profile.model_list.trim().is_empty() {
@@ -2558,7 +2577,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(
             temp.path().join("config.toml"),
-            "model_provider = \"custom\"\nmodel = \"gpt-image-2\"\n\n[model_providers.custom]\nname = \"custom\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"https://ahg.codes\"\n",
+            "model_provider = \"custom\"\nmodel = \"gpt-image-2\"\n\n[model_providers.custom]\nname = \"custom\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"https://image-relay.example\"\n",
         )
         .unwrap();
         std::fs::write(temp.path().join("auth.json"), "{}\n").unwrap();
@@ -2566,7 +2585,7 @@ mod tests {
         let mut profile = RelayProfile {
             relay_mode: crate::settings::RelayMode::PureApi,
             protocol: crate::settings::RelayProtocol::Responses,
-            config_contents: "model_provider = \"ai\"\nmodel = \"gpt-image-2\"\n\n[model_providers.ai]\nname = \"ai\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"https://ahg.codes\"\n"
+            config_contents: "model_provider = \"ai\"\nmodel = \"gpt-image-2\"\n\n[model_providers.ai]\nname = \"ai\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"https://image-relay.example\"\n"
                 .to_string(),
             auth_contents: "{}\n".to_string(),
             ..RelayProfile::default()
@@ -2607,6 +2626,45 @@ mod tests {
             ..RelayProfile::default()
         };
         assert!(relay_profile_model(&empty).trim().is_empty());
+    }
+
+    #[test]
+    fn relay_profile_base_url_prefers_edited_field_over_stale_config() {
+        let profile = RelayProfile {
+            protocol: crate::settings::RelayProtocol::Responses,
+            base_url: "https://new.example/v1".to_string(),
+            upstream_base_url: "https://new.example/v1".to_string(),
+            config_contents: r#"model_provider = "custom"
+
+[model_providers.custom]
+base_url = "https://"
+"#
+            .to_string(),
+            ..RelayProfile::default()
+        };
+
+        assert_eq!(relay_profile_base_url(&profile), "https://new.example/v1");
+    }
+
+    #[test]
+    fn relay_profile_base_url_keeps_native_protocol_upstream_after_reload() {
+        let profile = RelayProfile {
+            protocol: crate::settings::RelayProtocol::Anthropic,
+            base_url: "https://".to_string(),
+            upstream_base_url: "https://anthropic-relay.example".to_string(),
+            config_contents: r#"model_provider = "custom"
+
+[model_providers.custom]
+base_url = "http://127.0.0.1:58321/v1"
+"#
+            .to_string(),
+            ..RelayProfile::default()
+        };
+
+        assert_eq!(
+            relay_profile_base_url(&profile),
+            "https://anthropic-relay.example"
+        );
     }
 }
 

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -420,6 +420,13 @@ pub struct HotSwitchMappingsRequest {
     pub mappings: Vec<HotSwitchModelMapping>,
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HotSwitchScanRequest {
+    #[serde(default)]
+    pub relay_ids: Vec<String>,
+}
+
 #[tauri::command]
 pub fn backend_version() -> CommandResult<VersionPayload> {
     ok(
@@ -765,15 +772,17 @@ async fn set_hot_switch_inner(
                 hot_switch_payload(runtime, current).await,
             );
         }
-        if !current.hot_switch_enabled {
-            if let Err(error) = apply_hot_switch_codex_config(&next) {
-                let _ = store.save(&current);
+        if let Err(error) = apply_hot_switch_codex_config(&next) {
+            let _ = store.save(&current);
+            if current.hot_switch_enabled {
+                let _ = apply_hot_switch_codex_config(&current);
+            } else {
                 runtime.stop().await;
-                return failed(
-                    &format!("写入 Codex 热切换配置失败：{error}"),
-                    hot_switch_payload(runtime, current).await,
-                );
             }
+            return failed(
+                &format!("写入 Codex 热切换配置失败：{error}"),
+                hot_switch_payload(runtime, current).await,
+            );
         }
         *runtime.last_error.lock().await = None;
         let payload = hot_switch_payload(runtime, next).await;
@@ -810,11 +819,29 @@ async fn set_hot_switch_inner(
 #[tauri::command]
 pub async fn scan_hot_switch_model_mappings(
     runtime: tauri::State<'_, HotSwitchRuntime>,
+    request: HotSwitchScanRequest,
 ) -> Result<CommandResult<HotSwitchMappingPayload>, String> {
     let _operation = runtime.operation.lock().await;
     let store = SettingsStore::default();
     let current = store.load().unwrap_or_default();
-    let scan = codex_plus_core::hot_switch_mapping::scan_hot_switch_model_mappings(&current).await;
+    let scan_settings = hot_switch_scan_settings(&current, &request.relay_ids);
+    let mut scan =
+        codex_plus_core::hot_switch_mapping::scan_hot_switch_model_mappings(&scan_settings).await;
+    if !request.relay_ids.is_empty() {
+        let allowed_relay_ids = scan_settings
+            .relay_profiles
+            .iter()
+            .map(|profile| profile.id.as_str())
+            .collect::<HashSet<_>>();
+        for mapping in &mut scan.mappings {
+            mapping
+                .candidate_relay_ids
+                .retain(|relay_id| allowed_relay_ids.contains(relay_id.as_str()));
+            mapping
+                .fallback_relay_ids
+                .retain(|relay_id| allowed_relay_ids.contains(relay_id.as_str()));
+        }
+    }
     if scan.providers.is_empty() {
         return Ok(failed(
             "没有可扫描的 API 供应商，请先配置 Base URL 和 Key。",
@@ -831,6 +858,10 @@ pub async fn scan_hot_switch_model_mappings(
     let mut next = current.clone();
     next.hot_switch_model_mappings = scan.mappings.clone();
     next.hot_switch_model_routing_enabled = true;
+    if !request.relay_ids.is_empty() {
+        // 多供应商注入依赖 renderer 白名单补丁把 /v1/models 合并进 Codex 选择器。
+        next.codex_app_model_whitelist_unlock = true;
+    }
     let fallback_is_mapped = next.hot_switch_model_mappings.iter().any(|mapping| {
         mapping.relay_id == next.hot_switch_relay_id
             && mapping.upstream_model == next.hot_switch_model
@@ -876,6 +907,26 @@ pub async fn scan_hot_switch_model_mappings(
         message,
         payload,
     })
+}
+
+fn hot_switch_scan_settings(
+    settings: &BackendSettings,
+    requested_relay_ids: &[String],
+) -> BackendSettings {
+    let requested_relay_ids = requested_relay_ids
+        .iter()
+        .map(|relay_id| relay_id.trim())
+        .filter(|relay_id| !relay_id.is_empty())
+        .collect::<HashSet<_>>();
+    if requested_relay_ids.is_empty() {
+        return settings.clone();
+    }
+
+    let mut scoped = settings.clone();
+    scoped
+        .relay_profiles
+        .retain(|profile| requested_relay_ids.contains(profile.id.as_str()));
+    scoped
 }
 
 #[tauri::command]
@@ -2734,6 +2785,35 @@ pub fn extract_relay_common_config(
     }
 }
 
+fn relay_profile_test_message(
+    profile_name: &str,
+    test_model: &str,
+    http_status: u16,
+    response_preview: &str,
+) -> String {
+    if http_status < 400 {
+        return format!(
+            "供应商「{profile_name}」使用模型「{test_model}」测试成功（HTTP {http_status}）。"
+        );
+    }
+
+    let preview = response_preview.trim();
+    let mut summary = preview.chars().take(160).collect::<String>();
+    if preview.chars().count() > 160 {
+        summary.push('…');
+    }
+
+    if summary.is_empty() {
+        format!(
+            "供应商「{profile_name}」使用模型「{test_model}」测试失败（HTTP {http_status}，响应内容为空）。"
+        )
+    } else {
+        format!(
+            "供应商「{profile_name}」使用模型「{test_model}」测试失败（HTTP {http_status}）：{summary}"
+        )
+    }
+}
+
 #[tauri::command]
 pub async fn test_relay_profile(profile: RelayProfile) -> CommandResult<RelayProfileTestPayload> {
     let profile_name = if profile.name.trim().is_empty() {
@@ -2762,17 +2842,13 @@ pub async fn test_relay_profile(profile: RelayProfile) -> CommandResult<RelayPro
             } else {
                 "failed"
             };
-            let preview = result.response_preview.trim();
-            let detail = if preview.is_empty() {
-                "响应内容为空".to_string()
-            } else {
-                format!("响应：{preview}")
-            };
             CommandResult {
                 status: status.to_string(),
-                message: format!(
-                    "已向「{profile_name}」用模型「{test_model}」发送 hi，HTTP {}。{detail}",
-                    result.http_status
+                message: relay_profile_test_message(
+                    profile_name,
+                    &test_model,
+                    result.http_status,
+                    &result.response_preview,
                 ),
                 payload: RelayProfileTestPayload {
                     http_status: result.http_status,
@@ -3852,6 +3928,92 @@ mod tests {
     use super::*;
 
     #[test]
+    fn hot_switch_scan_settings_keeps_only_selected_suppliers() {
+        let settings = BackendSettings {
+            relay_profiles: vec![
+                RelayProfile {
+                    id: "relay-a".to_string(),
+                    ..RelayProfile::default()
+                },
+                RelayProfile {
+                    id: "relay-b".to_string(),
+                    ..RelayProfile::default()
+                },
+                RelayProfile {
+                    id: "relay-c".to_string(),
+                    ..RelayProfile::default()
+                },
+            ],
+            ..BackendSettings::default()
+        };
+
+        let scoped =
+            hot_switch_scan_settings(&settings, &[" relay-c ".to_string(), "relay-a".to_string()]);
+
+        assert_eq!(
+            scoped
+                .relay_profiles
+                .iter()
+                .map(|profile| profile.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["relay-a", "relay-c"]
+        );
+        assert_eq!(settings.relay_profiles.len(), 3);
+    }
+
+    #[test]
+    fn hot_switch_scan_settings_uses_all_suppliers_when_selection_is_empty() {
+        let settings = BackendSettings {
+            relay_profiles: vec![RelayProfile {
+                id: "relay-a".to_string(),
+                ..RelayProfile::default()
+            }],
+            ..BackendSettings::default()
+        };
+
+        let scoped = hot_switch_scan_settings(&settings, &[]);
+
+        assert_eq!(scoped.relay_profiles, settings.relay_profiles);
+    }
+
+    #[test]
+    fn relay_profile_success_message_is_short_and_does_not_include_response_body() {
+        let message = relay_profile_test_message(
+            "低价 Codex",
+            "gpt-5.5",
+            200,
+            r#"{"id":"resp-secret","object":"response","status":"completed"}"#,
+        );
+
+        assert_eq!(
+            message,
+            "供应商「低价 Codex」使用模型「gpt-5.5」测试成功（HTTP 200）。"
+        );
+        assert!(!message.contains("resp-secret"));
+        assert!(!message.contains("响应"));
+    }
+
+    #[test]
+    fn relay_profile_failure_message_limits_response_summary() {
+        let response = "错".repeat(200);
+        let message = relay_profile_test_message("供应商 A", "model-a", 502, &response);
+
+        assert!(message.starts_with("供应商「供应商 A」使用模型「model-a」测试失败（HTTP 502）："));
+        assert!(message.ends_with('…'));
+        assert_eq!(message.matches('错').count(), 160);
+    }
+
+    #[test]
+    fn relay_profile_failure_message_reports_empty_response() {
+        let message = relay_profile_test_message("供应商 A", "model-a", 500, "  ");
+
+        assert_eq!(
+            message,
+            "供应商「供应商 A」使用模型「model-a」测试失败（HTTP 500，响应内容为空）。"
+        );
+    }
+
+    #[test]
     fn stale_frontend_settings_do_not_clear_a_persisted_detected_app_path() {
         let temp = tempfile::tempdir().unwrap();
         let app = temp.path().join("app");
@@ -4309,7 +4471,7 @@ mod tests {
         let profile = RelayProfile {
             relay_mode: codex_plus_core::settings::RelayMode::PureApi,
             protocol: codex_plus_core::settings::RelayProtocol::Responses,
-            config_contents: "model_provider = \"ai\"\nmodel = \"gpt-image-2\"\n\n[model_providers.ai]\nname = \"ai\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"https://ahg.codes\"\n"
+            config_contents: "model_provider = \"ai\"\nmodel = \"gpt-image-2\"\n\n[model_providers.ai]\nname = \"ai\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"https://image-relay.example\"\n"
                 .to_string(),
             auth_contents: "{}\n".to_string(),
             ..RelayProfile::default()

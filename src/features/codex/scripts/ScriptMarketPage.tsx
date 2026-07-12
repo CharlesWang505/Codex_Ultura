@@ -5,6 +5,7 @@ import type { ScriptMarketItem, ScriptMarketResult, SettingsResult, UserScriptIn
 import { InstalledScriptRow } from './InstalledScriptRow'
 import { MarketScriptCard } from './MarketScriptCard'
 import type { DeleteScriptState, InstalledScript, ScriptPageNotice } from './types'
+import { CodexNotice } from '../shared/CodexNotice'
 import './ScriptMarketPage.css'
 
 const SCRIPT_MARKET_REPOSITORY_URL = 'https://github.com/BigPizzaV3/CodexPlusPlusScriptMarket'
@@ -170,7 +171,7 @@ export function ScriptMarketPage({ settingsResult, onSettingsResultChange }: Pro
 
   return (
     <div className="script-market-page">
-      {notice ? <div className={`script-notice ${notice.tone}`}><span>{notice.text}</span><button type="button" aria-label="关闭提示" onClick={() => setNotice(null)}><X size={14} /></button></div> : null}
+      {notice ? <CodexNotice tone={notice.tone} text={notice.text} onDismiss={() => setNotice(null)} /> : null}
 
       <section className="script-panel script-overview-panel">
         <header><div><FileCode2 size={18} /><strong>脚本市场</strong></div><span>{market?.market.message || '尚未刷新市场'}</span></header>

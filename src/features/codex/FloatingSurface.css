@@ -78,6 +78,9 @@ body:has(.floating-panel-shell),
 .floating-panel-shell select { width: 100%; height: 36px; box-sizing: border-box; padding: 0 9px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--bg-input); outline: none; }
 .floating-panel-shell input:focus,
 .floating-panel-shell select:focus { border-color: var(--accent-border); box-shadow: var(--focus-ring); }
+.floating-panel-shell input:disabled,
+.floating-panel-shell select:disabled { cursor: not-allowed; opacity: .62; }
+.floating-routing-hint { padding: 8px 10px; border: 1px solid var(--accent-border); border-radius: 8px; color: var(--text-muted); background: var(--accent-bg); font-size: 11px; line-height: 1.45; }
 .floating-actions { gap: 8px; }
 .floating-actions button { flex: 1; justify-content: center; gap: 6px; }
 .floating-open-main { justify-content: center; gap: 6px; }

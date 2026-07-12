@@ -2,7 +2,7 @@
 
 ## 仓库内容
 
-将本目录中的文件上传到 GitHub 仓库。不要把同级的 `Codex_Ultura-Release-1.2.1` 目录提交到源码仓库。
+将本目录中的文件上传到 GitHub 仓库。不要把同级的 `Codex_Ultura-Release-1.2.8` 目录提交到源码仓库。
 
 推荐仓库设置：
 
@@ -13,11 +13,11 @@
 
 ## Release 资产
 
-在 GitHub Releases 创建 `v1.2.1`，从同级 `Codex_Ultura-Release-1.2.1` 上传：
+在 GitHub Releases 创建 `v1.2.8`，从同级 `Codex_Ultura-Release-1.2.8` 上传：
 
-- `Codex_Ultura_1.2.1_x64-portable.exe`
-- `Codex_Ultura_1.2.1_x64-setup.exe`
-- `Codex_Ultura_1.2.1_source.zip`
+- `Codex_Ultura_1.2.8_x64-portable.exe`
+- `Codex_Ultura_1.2.8_x64-setup.exe`
+- `Codex_Ultura_1.2.8_source.zip`
 - `SHA256SUMS.txt`
 
 ## 不得上传

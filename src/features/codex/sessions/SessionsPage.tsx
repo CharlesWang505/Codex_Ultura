@@ -23,6 +23,7 @@ import type {
   ProviderSyncTargetsResult,
   SessionStatusFilter,
 } from './types'
+import { CodexNotice } from '../shared/CodexNotice'
 import './SessionsPage.css'
 
 type Props = {
@@ -246,7 +247,7 @@ export function SessionsPage({ settings, onSettingsChange }: Props) {
 
   return (
     <div className="sessions-page">
-      {notice ? <div className={`sessions-notice ${notice.tone}`}><span>{notice.text}</span><button type="button" aria-label="关闭提示" onClick={() => setNotice(null)}><X size={14} /></button></div> : null}
+      {notice ? <CodexNotice tone={notice.tone} text={notice.text} onDismiss={() => setNotice(null)} /> : null}
 
       <section className="sessions-panel sessions-overview-panel">
         <header><div><FolderClock size={18} /><strong>会话管理</strong></div><button type="button" disabled={operationBusy} onClick={() => void refreshSessions()}>{busyKeys.has('sessions') ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}刷新会话</button></header>

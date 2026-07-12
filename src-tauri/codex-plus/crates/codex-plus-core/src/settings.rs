@@ -44,7 +44,7 @@ impl Default for RelayContextSelection {
 pub struct RelayProfile {
     pub id: String,
     pub name: String,
-    #[serde(default, skip_serializing)]
+    #[serde(default)]
     pub model: String,
     #[serde(default = "default_relay_base_url", skip_serializing)]
     pub base_url: String,
@@ -1070,7 +1070,7 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
         preserve_official_mix_bearer_tokens(&mut profiles, target);
         target.insert(
             "relayProfiles".to_string(),
-            serde_json::to_value(profiles).unwrap_or_else(|_| Value::Array(Vec::new())),
+            relay_profiles_to_storage_value(&profiles),
         );
     }
     if let Some(value) = source
@@ -1239,9 +1239,29 @@ fn parse_toml_document(contents: &str) -> anyhow::Result<DocumentMut> {
 
 fn settings_to_object(settings: &BackendSettings) -> Map<String, Value> {
     match serde_json::to_value(settings).unwrap_or_else(|_| Value::Object(Map::new())) {
-        Value::Object(map) => map,
+        Value::Object(mut map) => {
+            map.insert(
+                "relayProfiles".to_string(),
+                relay_profiles_to_storage_value(&settings.relay_profiles),
+            );
+            map
+        }
         _ => Map::new(),
     }
+}
+
+fn relay_profiles_to_storage_value(profiles: &[RelayProfile]) -> Value {
+    let mut value = serde_json::to_value(profiles).unwrap_or_else(|_| Value::Array(Vec::new()));
+    if let Some(profiles) = value.as_array_mut() {
+        for profile in profiles {
+            if let Some(profile) = profile.as_object_mut() {
+                // `model` is exposed over the Tauri IPC so the editor can restore the
+                // selected default. On disk it remains derived from configContents.
+                profile.remove("model");
+            }
+        }
+    }
+    value
 }
 
 fn normalize_settings_config_sections(mut settings: BackendSettings) -> BackendSettings {
@@ -1604,7 +1624,7 @@ mod tests {
     }
 
     #[test]
-    fn relay_profile_derived_fields_are_read_but_not_serialized() {
+    fn relay_profile_model_is_exposed_but_sensitive_derived_fields_are_not_serialized() {
         let profile: RelayProfile = serde_json::from_str(
             r#"{
                 "id":"relay-a",
@@ -1623,11 +1643,46 @@ mod tests {
         assert_eq!(profile.api_key, "sk-test");
 
         let saved = serde_json::to_value(&profile).unwrap();
-        assert!(saved.get("model").is_none());
+        assert_eq!(saved["model"], "gpt-5.4");
         assert!(saved.get("baseUrl").is_none());
         assert!(saved.get("apiKey").is_none());
         assert_eq!(saved["configContents"], "model = \"gpt-5.4\"\n");
         assert_eq!(saved["authContents"], "{\"OPENAI_API_KEY\":\"sk-test\"}");
+    }
+
+    #[test]
+    fn settings_store_restores_default_model_for_frontend_without_duplicating_it_on_disk() {
+        let dir = temp_dir();
+        let path = dir.join("settings.json");
+        let store = SettingsStore::new(path.clone());
+        let settings = BackendSettings {
+            relay_profiles: vec![RelayProfile {
+                id: "relay-a".to_string(),
+                name: "供应商 A".to_string(),
+                relay_mode: RelayMode::PureApi,
+                model: "gpt-5.5".to_string(),
+                base_url: "https://relay.example/v1".to_string(),
+                upstream_base_url: "https://relay.example/v1".to_string(),
+                api_key: "sk-test".to_string(),
+                ..RelayProfile::default()
+            }],
+            ..BackendSettings::default()
+        };
+
+        store.save(&settings).unwrap();
+        let loaded = store.load().unwrap();
+        let frontend = serde_json::to_value(&loaded).unwrap();
+        let stored: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+
+        assert_eq!(loaded.relay_profiles[0].model, "gpt-5.5");
+        assert_eq!(frontend["relayProfiles"][0]["model"], "gpt-5.5");
+        assert!(stored["relayProfiles"][0].get("model").is_none());
+        assert!(
+            stored["relayProfiles"][0]["configContents"]
+                .as_str()
+                .unwrap()
+                .contains(r#"model = "gpt-5.5""#)
+        );
     }
 
     #[test]

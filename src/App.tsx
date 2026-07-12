@@ -64,6 +64,7 @@ import {
   ZAxis,
 } from 'recharts'
 import './App.css'
+import { callCodex } from './features/codex/api'
 import type { CodexSection } from './features/codex/CodexWorkspace'
 import { fetchUsageSnapshot, loginNewApi, type NewApiLoginResult, type UsageFetchProgress } from './lib/relayApi'
 import { createDemoSnapshot } from './lib/sampleData'
@@ -220,7 +221,7 @@ function totalTimingLevel(log: UsageLog): TimingLevel {
 
 function firstTokenTimingLevel(value: number): TimingLevel {
   if (!(value > 0)) return 'unknown'
-  if (value <= 3_000) return 'good'
+  if (value <= 5_000) return 'good'
   if (value <= 10_000) return 'warn'
   return 'bad'
 }
@@ -1096,6 +1097,7 @@ function validateSite(site: RelaySite) {
 function App() {
   const [theme, toggleTheme] = useTheme()
   const [appVersion, setAppVersion] = useState(__APP_VERSION__)
+  const [brandRestartState, setBrandRestartState] = useState<'idle' | 'busy' | 'ok' | 'error'>('idle')
   const [closeBehavior, setCloseBehavior] = useState<CloseBehavior>('ask')
   const [closePreferenceState, setClosePreferenceState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [closePromptOpen, setClosePromptOpen] = useState(false)
@@ -1816,6 +1818,25 @@ function App() {
     setRateDrafts({})
   }, [])
 
+  const restartCodexFromBrand = useCallback(async () => {
+    if (brandRestartState === 'busy') return
+    if (!isTauriRuntime()) {
+      setBrandRestartState('error')
+      window.setTimeout(() => setBrandRestartState('idle'), 2400)
+      return
+    }
+    setBrandRestartState('busy')
+    try {
+      const result = await callCodex<{ status: string }>('restart_codex_plus', {
+        request: { appPath: '', debugPort: 9222, helperPort: 58321 },
+      })
+      setBrandRestartState(result.status === 'failed' ? 'error' : 'ok')
+    } catch {
+      setBrandRestartState('error')
+    }
+    window.setTimeout(() => setBrandRestartState('idle'), 2400)
+  }, [brandRestartState])
+
   const availableModels = useMemo(() => {
     const models: string[] = []
     scopedSnapshot.models.forEach((model) => {
@@ -1883,10 +1904,19 @@ function App() {
     <main className="app-shell">
       <header className="window-bar">
         <div className="brand" data-tauri-drag-region onDoubleClick={() => runWindowAction('toggleMaximize')}>
-          <div className="brand-mark" data-tauri-drag-region>
+          <button
+            className={`brand-mark brand-restart ${brandRestartState}`}
+            type="button"
+            aria-label="重启 Codex"
+            title={brandRestartState === 'busy' ? '正在重启 Codex…' : brandRestartState === 'ok' ? '已请求重启 Codex' : brandRestartState === 'error' ? '重启失败，请到概览查看状态' : '点击重启 Codex'}
+            disabled={brandRestartState === 'busy'}
+            onClick={() => void restartCodexFromBrand()}
+            onDoubleClick={(event) => event.stopPropagation()}
+          >
             <Zap size={18} />
-          </div>
+          </button>
           <strong data-tauri-drag-region>Codex_Ultura</strong>
+          {brandRestartState !== 'idle' ? <span className={`brand-restart-status ${brandRestartState}`}>{brandRestartState === 'busy' ? '正在重启 Codex…' : brandRestartState === 'ok' ? '已请求重启' : '重启失败'}</span> : null}
         </div>
         <div className="window-drag-region" data-tauri-drag-region onDoubleClick={() => runWindowAction('toggleMaximize')} />
         <div className="window-bar-actions">
@@ -2989,7 +3019,7 @@ function App() {
                         <th>真实总 Tokens</th>
                         <th>实际成本($)</th>
                         <th>缓存</th>
-                        <th>用时/首字</th>
+                        <th>响应耗时</th>
                         <th>操作</th>
                       </tr>
                     </thead>
@@ -3022,10 +3052,10 @@ function App() {
                             <span className="latency-cell">
                               <strong className="timing-badges">
                                 <span className={`timing-badge timing-${totalTimingLevel(log)}`} title="总响应时间">
-                                  {formatTimingBadge(log.latencyMs)}
+                                  <i>总</i>{formatTimingBadge(log.latencyMs)}
                                 </span>
                                 <span className={`timing-badge timing-${firstTokenTimingLevel(log.firstTokenMs)}`} title="首字响应时间（FRT）">
-                                  {formatTimingBadge(log.firstTokenMs)}
+                                  <i>首</i>{formatTimingBadge(log.firstTokenMs)}
                                 </span>
                               </strong>
                               <em>{formatConversationMeta(log)}</em>

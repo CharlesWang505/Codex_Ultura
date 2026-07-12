@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
-  Boxes,
   CircleAlert,
   Download,
   KeyRound,
@@ -257,6 +256,13 @@ export function CodexWorkspace({ section }: Props) {
     () => settings?.relayProfiles.find((profile) => profile.id === selectedProfileId) ?? settings?.relayProfiles[0] ?? null,
     [selectedProfileId, settings],
   )
+  const selectableProfileModels = useMemo(() => {
+    const configuredModels = selectedProfile?.modelList
+      .split(/[\r\n,]/)
+      .map((value) => value.trim())
+      .filter(Boolean) ?? []
+    return Array.from(new Set([...profileModels, ...configuredModels]))
+  }, [profileModels, selectedProfile?.modelList])
   const selectedAggregateProfile = useMemo(
     () => selectedProfile ? settings?.aggregateRelayProfiles.find((profile) => profile.id === selectedProfile.id) ?? null : null,
     [selectedProfile, settings],
@@ -351,7 +357,12 @@ export function CodexWorkspace({ section }: Props) {
       if (result) {
         setProfileModels(result.models)
         setNotice(noticeFrom(result))
-        if (commandSucceeded(result) && result.models.length) patchProfile({ modelList: result.models.join('\n') })
+        if (commandSucceeded(result) && result.models.length) {
+          patchProfile({
+            modelList: result.models.join('\n'),
+            model: selectedProfile.model?.trim() ? selectedProfile.model : result.models[0],
+          })
+        }
       }
       return
     }
@@ -429,15 +440,85 @@ export function CodexWorkspace({ section }: Props) {
     }
   }, [acceptSettings, mappings, run, saveSettings, settings])
 
-  const scanMappings = useCallback(async () => {
-    const result = await run('scan-mappings', () => callCodex<HotSwitchMappingResult>('scan_hot_switch_model_mappings'))
+  const scanMappings = useCallback(async (relayIds: string[] = []) => {
+    if (!settings) return
+    const result = await run('scan-mappings', async () => {
+      const savedDrafts = await callCodex<HotSwitchMappingResult>('save_hot_switch_model_mappings', {
+        request: { enabled: settings.hotSwitchModelRoutingEnabled, mappings },
+      })
+      if (!commandSucceeded(savedDrafts)) return savedDrafts
+      return callCodex<HotSwitchMappingResult>('scan_hot_switch_model_mappings', {
+        request: { relayIds },
+      })
+    })
     if (result) {
       setMappingScan(result)
       setMappings(result.mappings)
       acceptSettings(result)
       setNotice(noticeFrom(result))
     }
-  }, [acceptSettings, run])
+  }, [acceptSettings, mappings, run, settings])
+
+  const injectProviderModels = useCallback(async (relayIds: string[]) => {
+    if (!relayIds.length) {
+      setNotice({ tone: 'warning', text: '请至少选择一个要注入模型的供应商。' })
+      return
+    }
+    const result = await run('inject-models', async () => {
+      if (settings) {
+        const savedDrafts = await callCodex<HotSwitchMappingResult>('save_hot_switch_model_mappings', {
+          request: { enabled: settings.hotSwitchModelRoutingEnabled, mappings },
+        })
+        if (!commandSucceeded(savedDrafts)) return { scan: savedDrafts, hot: null, restart: null }
+      }
+      const scan = await callCodex<HotSwitchMappingResult>('scan_hot_switch_model_mappings', {
+        request: { relayIds },
+      })
+      if (!commandSucceeded(scan) || !scan.mappings.length) return { scan, hot: null, restart: null }
+      const hot = await callCodex<HotSwitchResult>('set_hot_switch', {
+        request: {
+          enabled: true,
+          relayId: scan.settings.hotSwitchRelayId || relayIds[0],
+          model: scan.settings.hotSwitchModel,
+        },
+      })
+      if (!commandSucceeded(hot)) return { scan, hot, restart: null }
+      const restart = await callCodex<CommandResult<{ debugPort: number; helperPort: number }>>('restart_codex_plus', {
+        request: {
+          appPath: hot.settings.codexAppPath ?? '',
+          debugPort: 9222,
+          helperPort: 58321,
+        },
+      })
+      return { scan, hot, restart }
+    })
+    if (!result) return
+
+    setMappingScan(result.scan)
+    setMappings(result.scan.mappings)
+    acceptSettings(result.scan)
+    if (!result.hot) {
+      setNotice(noticeFrom(result.scan))
+      return
+    }
+    setHotSwitch(result.hot)
+    acceptSettings(result.hot)
+    if (!commandSucceeded(result.hot)) {
+      setNotice(noticeFrom(result.hot))
+      return
+    }
+    if (!result.restart || result.restart.status === 'failed') {
+      setNotice({
+        tone: 'warning',
+        text: `已生成 ${result.scan.mappings.length} 个模型并开启 8787，但 Codex 自动重启失败。请在“概览”中手动点击“重启 Codex”以加载完整模型列表。`,
+      })
+      return
+    }
+    setNotice({
+      tone: result.scan.status === 'warning' ? 'warning' : 'ok',
+      text: `已从 ${result.scan.providers.length} 个供应商生成 ${result.scan.mappings.length} 个 Codex 模型，启用模型白名单解锁，并已请求重启 Codex。`,
+    })
+  }, [acceptSettings, mappings, run, settings])
 
   const saveMappings = useCallback(async () => {
     if (!settings) return
@@ -651,48 +732,71 @@ export function CodexWorkspace({ section }: Props) {
             {selectedProfile && settings ? (
               <>
                 {settings.hotSwitchEnabled ? <div className="codex-lock-banner"><ShieldCheck size={16} />8787 热切换已开启，供应商配置已锁定；关闭网关后才能保存修改。</div> : null}
-                <Panel title={selectedProfile.name} icon={<KeyRound size={18} />} action={<div className="codex-inline-actions"><button type="button" className="danger" disabled={settings.hotSwitchEnabled || settings.relayProfiles.length <= 1} onClick={removeProfile}><Trash2 size={14} />删除</button><LoadingButton busy={busy === 'save-settings'} disabled={settings.hotSwitchEnabled} onClick={() => void saveProfiles()}><Save size={14} />保存</LoadingButton></div>}>
-                  <div className="codex-form-grid">
-                    <Field label="名称"><input value={selectedProfile.name} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ name: event.target.value })} /></Field>
-                    <Field label="模式"><select value={selectedProfile.relayMode} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ relayMode: event.target.value as RelayProfile['relayMode'] })}><option value="official">官方模式</option><option value="mixedApi">混合 API</option><option value="pureApi">纯 API</option><option value="aggregate">聚合供应商</option></select></Field>
+                <Panel title={selectedProfile.name} icon={<KeyRound size={18} />} action={<div className="codex-inline-actions"><button type="button" className="danger" disabled={settings.hotSwitchEnabled || settings.relayProfiles.length <= 1} onClick={removeProfile}><Trash2 size={14} />删除</button></div>}>
+                  <div className="codex-provider-guide">
+                    <strong>三步完成配置</strong>
+                    <ol><li>填写 Base URL 和 API Key</li><li>点击“获取模型”并选择默认模型</li><li>点击“保存并应用到 Codex”</li></ol>
+                  </div>
+                  <div className="codex-form-grid codex-provider-basic-grid">
+                    <Field label="供应商名称"><input value={selectedProfile.name} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ name: event.target.value })} /></Field>
+                    <Field label="使用方式" hint="普通中转站保持“纯 API”即可。"><select value={selectedProfile.relayMode} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ relayMode: event.target.value as RelayProfile['relayMode'] })}><option value="pureApi">纯 API（推荐）</option><option value="official">官方账号</option><option value="mixedApi">官方账号 + API</option><option value="aggregate">聚合供应商</option></select></Field>
                     {selectedProfile.relayMode === 'aggregate' && selectedAggregateProfile ? (
                       <div className="codex-field wide"><AggregateRelayEditor profile={selectedAggregateProfile} relayProfiles={settings.relayProfiles} disabled={settings.hotSwitchEnabled} onChange={patchAggregateProfile} /></div>
                     ) : (
                       <>
-                        <Field label="协议"><select value={selectedProfile.protocol} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ protocol: event.target.value as RelayProfile['protocol'] })}><option value="responses">OpenAI Responses</option><option value="chatCompletions">OpenAI Chat Completions</option><option value="anthropic">Anthropic（按需）</option><option value="gemini">Gemini（按需）</option></select></Field>
-                        <Field label="Reasoning 方言"><select value={selectedProfile.reasoningDialect ?? 'inherit'} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ reasoningDialect: event.target.value as RelayProfile['reasoningDialect'] })}><option value="inherit">自动继承</option><option value="openai">OpenAI reasoning_effort</option><option value="openrouter">OpenRouter reasoning</option><option value="qwen">Qwen enable_thinking</option><option value="siliconflow">硅基流动 enable_thinking</option><option value="none">不发送推理参数</option></select></Field>
-                        <Field label="Base URL" wide><input value={selectedProfile.baseUrl ?? selectedProfile.upstreamBaseUrl ?? ''} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ baseUrl: event.target.value, upstreamBaseUrl: event.target.value })} /></Field>
-                        <Field label="API Key" hint={selectedProfile.apiKey === undefined ? 'Key 已保存在本地配置中；输入新值时才会替换。' : undefined} wide><input type="password" value={selectedProfile.apiKey ?? ''} placeholder={selectedProfile.apiKey === undefined ? '已保存' : ''} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ apiKey: event.target.value })} /></Field>
-                        <Field label="默认模型"><input value={selectedProfile.model ?? selectedProfile.modelList.split(/[\r\n,]/).map((value) => value.trim()).find(Boolean) ?? ''} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ model: event.target.value })} /></Field>
-                        <Field label="测试模型"><input value={selectedProfile.testModel} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ testModel: event.target.value })} /></Field>
-                        <Field label="上下文窗口"><input value={selectedProfile.contextWindow} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ contextWindow: event.target.value })} placeholder="例如 200000" /></Field>
-                        <Field label="自动压缩阈值"><input value={selectedProfile.autoCompactLimit} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ autoCompactLimit: event.target.value })} /></Field>
-                        <Field label="模型列表" hint="每行一个模型；可通过“获取模型”自动填充。" wide><textarea rows={8} value={selectedProfile.modelList} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ modelList: event.target.value })} /></Field>
-                        <Field label="自定义 User-Agent" wide><input value={selectedProfile.userAgent} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ userAgent: event.target.value })} /></Field>
+                        <Field label="接口协议" hint="大多数 Codex 中转站选择 OpenAI Responses。"><select value={selectedProfile.protocol} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ protocol: event.target.value as RelayProfile['protocol'] })}><option value="responses">OpenAI Responses（推荐）</option><option value="chatCompletions">OpenAI Chat Completions</option><option value="anthropic">Anthropic 原生</option><option value="gemini">Gemini 原生</option></select></Field>
+                        <Field label="Base URL" hint="通常以 /v1 结尾，例如 https://example.com/v1"><input value={selectedProfile.baseUrl ?? selectedProfile.upstreamBaseUrl ?? ''} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ baseUrl: event.target.value, upstreamBaseUrl: event.target.value })} /></Field>
+                        <Field label="API Key" hint={selectedProfile.apiKey === undefined ? 'Key 已保存在本地；留空不会覆盖。' : '仅保存在本机敏感配置目录。'}><input type="password" value={selectedProfile.apiKey ?? ''} placeholder={selectedProfile.apiKey === undefined ? '已保存' : 'sk-...'} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ apiKey: event.target.value })} /></Field>
+                        <Field label="默认模型" hint={selectableProfileModels.length ? `已读取 ${selectableProfileModels.length} 个模型，可直接选择。` : '先点击下方“获取模型”，也可以手动输入。'}>
+                          <><input list={`provider-models-${selectedProfile.id}`} value={selectedProfile.model ?? ''} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ model: event.target.value })} /><datalist id={`provider-models-${selectedProfile.id}`}>{selectableProfileModels.map((model) => <option key={model} value={model} />)}</datalist></>
+                        </Field>
                       </>
                     )}
                   </div>
-                  <div className="codex-toolbar">
-                    {selectedProfile.relayMode !== 'aggregate' ? <LoadingButton busy={busy === 'profile-test'} onClick={() => void testProfile('test')}><Activity size={14} />测试请求</LoadingButton> : null}
-                    {selectedProfile.relayMode !== 'aggregate' ? <LoadingButton busy={busy === 'profile-models'} onClick={() => void testProfile('models')}><Download size={14} />获取模型</LoadingButton> : null}
-                    {selectedProfile.relayMode !== 'aggregate' ? <LoadingButton busy={busy === 'profile-doctor'} onClick={() => void testProfile('doctor')}><Stethoscope size={14} />诊断</LoadingButton> : null}
-                    <LoadingButton busy={busy === 'switch-profile'} disabled={settings.hotSwitchEnabled || !selectedProfileReady} onClick={() => void switchProfile()}><Zap size={14} />设为当前供应商</LoadingButton>
-                    <LoadingButton busy={busy === (selectedProfile.relayMode === 'aggregate' ? 'apply-relay' : 'apply-pure')} disabled={settings.hotSwitchEnabled || !selectedProfileReady} onClick={() => void applyRelay(selectedProfile.relayMode === 'aggregate' ? 'relay' : 'pure')}><Power size={14} />应用到 Codex</LoadingButton>
-                    <LoadingButton busy={busy === 'apply-clear'} disabled={settings.hotSwitchEnabled} onClick={() => void applyRelay('clear')}>清除注入</LoadingButton>
+                  {selectedProfile.relayMode !== 'aggregate' ? <details className="codex-provider-advanced">
+                    <summary><span>高级设置</span><small>Reasoning、测试模型、上下文和模型列表</small></summary>
+                    <div className="codex-form-grid">
+                      <Field label="Reasoning 方言"><select value={selectedProfile.reasoningDialect ?? 'inherit'} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ reasoningDialect: event.target.value as RelayProfile['reasoningDialect'] })}><option value="inherit">自动识别（推荐）</option><option value="openai">OpenAI reasoning_effort</option><option value="openrouter">OpenRouter reasoning</option><option value="qwen">Qwen enable_thinking</option><option value="siliconflow">硅基流动 enable_thinking</option><option value="none">不发送推理参数</option></select></Field>
+                      <Field label="测试模型" hint="留空时使用默认模型。"><input value={selectedProfile.testModel} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ testModel: event.target.value })} /></Field>
+                      <Field label="上下文窗口"><input value={selectedProfile.contextWindow} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ contextWindow: event.target.value })} placeholder="例如 200000" /></Field>
+                      <Field label="自动压缩阈值"><input value={selectedProfile.autoCompactLimit} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ autoCompactLimit: event.target.value })} placeholder="留空为自动" /></Field>
+                      <Field label="模型列表" hint="通常由“获取模型”自动填写；每行一个模型。" wide><textarea rows={6} value={selectedProfile.modelList} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ modelList: event.target.value })} /></Field>
+                      <Field label="自定义 User-Agent" hint="中转站没有特殊要求时保持为空。" wide><input value={selectedProfile.userAgent} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ userAgent: event.target.value })} /></Field>
+                    </div>
+                  </details> : null}
+                  <div className="codex-provider-primary-actions">
+                    <div className="codex-toolbar">
+                      {selectedProfile.relayMode !== 'aggregate' ? <LoadingButton busy={busy === 'profile-test'} onClick={() => void testProfile('test')}><Activity size={14} />测试连接</LoadingButton> : null}
+                      {selectedProfile.relayMode !== 'aggregate' ? <LoadingButton busy={busy === 'profile-models'} onClick={() => void testProfile('models')}><Download size={14} />获取模型</LoadingButton> : null}
+                      <LoadingButton busy={busy === 'save-settings'} className="primary" disabled={settings.hotSwitchEnabled} onClick={() => void saveProfiles()}><Save size={14} />仅保存</LoadingButton>
+                      <LoadingButton busy={busy === 'switch-profile'} className="primary" disabled={!settings.relayProfilesEnabled || settings.hotSwitchEnabled || !selectedProfileReady} onClick={() => void switchProfile()}><Power size={14} />保存并应用到 Codex</LoadingButton>
+                    </div>
+                    <small>{settings.relayProfilesEnabled ? '“保存并应用”会把当前供应商设为默认，并写入 Codex 配置；不需要再单独点击“设为当前”。' : '请先打开左侧“启用供应商配置”开关，才能应用到 Codex。'}</small>
                   </div>
+                  <details className="codex-provider-secondary-actions">
+                    <summary>诊断与清理</summary>
+                    <div className="codex-toolbar compact">
+                      {selectedProfile.relayMode !== 'aggregate' ? <LoadingButton busy={busy === 'profile-doctor'} onClick={() => void testProfile('doctor')}><Stethoscope size={14} />诊断供应商</LoadingButton> : null}
+                      <LoadingButton busy={busy === 'apply-clear'} disabled={settings.hotSwitchEnabled} onClick={() => void applyRelay('clear')}>清除 Codex 供应商配置</LoadingButton>
+                    </div>
+                  </details>
                 </Panel>
-                {profileModels.length ? <Panel title={`已获取 ${profileModels.length} 个模型`} icon={<Boxes size={18} />}><div className="codex-tag-cloud">{profileModels.map((model) => <span key={model}>{model}</span>)}</div></Panel> : null}
                 {doctor ? <Panel title="供应商诊断" icon={<Stethoscope size={18} />}><p className="codex-doctor-summary">{doctor.summary}</p><div className="codex-check-list">{doctor.checks.map((check) => <div key={check.id}><StatusPill ok={check.status === 'ok'}>{check.title}</StatusPill><span>{check.detail}</span></div>)}</div>{doctor.recommendation ? <p>{doctor.recommendation}</p> : null}</Panel> : null}
-                <Panel title="导入、环境与原始配置" icon={<Wrench size={18} />} action={<LoadingButton busy={busy === 'provider-advanced'} onClick={() => void loadProviderAdvanced()}><RefreshCw size={14} />读取</LoadingButton>}>
+                <details className="codex-provider-maintenance">
+                  <summary><span>高级维护与导入</span><small>读取当前 Codex、CCS 导入、环境变量和原始配置</small></summary>
+                  <div className="codex-provider-maintenance-body">
+                  <div className="codex-toolbar compact"><LoadingButton busy={busy === 'provider-advanced'} onClick={() => void loadProviderAdvanced()}><RefreshCw size={14} />读取维护状态</LoadingButton></div>
                   <div className="codex-toolbar compact">
                     <LoadingButton busy={busy === 'import-ccs'} disabled={!ccsProviders?.providers.length} onClick={() => void importCcsProviders()}>导入 CCS 供应商（{ccsProviders?.providers.length ?? 0}）</LoadingButton>
                     <LoadingButton busy={busy === 'remove-env-conflicts'} disabled={!envConflicts?.conflicts.length} onClick={() => void removeEnvConflicts()}>移除环境变量冲突（{envConflicts?.conflicts.length ?? 0}）</LoadingButton>
-                    <LoadingButton busy={busy === 'backfill'} onClick={() => settings && selectedProfile && void run('backfill', () => callCodex<SettingsResult>('backfill_relay_profile_from_live', { request: { settings, profileId: selectedProfile.id } })).then((result) => { if (result) { acceptSettings(result); setNotice(noticeFrom(result)) } })}>从当前 Codex 回填</LoadingButton>
+                    <LoadingButton busy={busy === 'backfill'} onClick={() => settings && selectedProfile && void run('backfill', () => callCodex<SettingsResult>('backfill_relay_profile_from_live', { request: { settings, profileId: selectedProfile.id } })).then((result) => { if (result) { acceptSettings(result); setNotice(noticeFrom(result)) } })}>读取当前 Codex 配置</LoadingButton>
                   </div>
+                  <p className="codex-provider-maintenance-hint">仅当你在软件外修改过 Codex 的 config.toml 或 auth.json 时使用“读取当前 Codex 配置”；它会回填到当前供应商，不会自动应用其他供应商。</p>
                   {pendingImport?.pending ? <div className="codex-pending-import"><div><strong>待导入：{pendingImport.pending.name}</strong><span>{pendingImport.pending.baseUrl}</span></div><div><button type="button" onClick={() => void resolvePendingImport(true)}>确认</button><button type="button" className="danger" onClick={() => void resolvePendingImport(false)}>忽略</button></div></div> : null}
                   {envConflicts?.conflicts.length ? <div className="codex-tag-cloud">{envConflicts.conflicts.map((conflict) => <span key={`${conflict.source}-${conflict.name}`}>{conflict.name} · {conflict.source}</span>)}</div> : null}
                   {relayFiles ? <details className="codex-raw-files"><summary>原始 config.toml / auth.json（包含敏感信息）</summary><div className="codex-form-grid"><Field label={`config.toml · ${relayFiles.configPath}`} wide><textarea rows={12} value={relayFiles.configContents} onChange={(event) => setRelayFiles((current) => current ? { ...current, configContents: event.target.value } : current)} /></Field><LoadingButton busy={busy === 'save-relay-config'} onClick={() => void saveRelayFile('config')}><Save size={14} />保存 config.toml</LoadingButton><Field label={`auth.json · ${relayFiles.authPath}`} wide><textarea rows={8} value={relayFiles.authContents} onChange={(event) => setRelayFiles((current) => current ? { ...current, authContents: event.target.value } : current)} /></Field><LoadingButton busy={busy === 'save-relay-auth'} onClick={() => void saveRelayFile('auth')}><Save size={14} />保存 auth.json</LoadingButton></div></details> : null}
-                </Panel>
+                  </div>
+                </details>
               </>
             ) : <EmptyState text="尚未创建 API 供应商。" />}
           </div>
@@ -710,6 +814,7 @@ export function CodexWorkspace({ section }: Props) {
           onMappingsChange={setMappings}
           onToggle={(enabled) => void updateHotSwitch(enabled)}
           onScan={() => void scanMappings()}
+          onInject={(relayIds) => void injectProviderModels(relayIds)}
           onSaveMappings={() => void saveMappings()}
           onSaveSettings={() => void saveSettings(settings)}
           onSetFloatingEnabled={(enabled) => void setFloatingEnabled(enabled)}

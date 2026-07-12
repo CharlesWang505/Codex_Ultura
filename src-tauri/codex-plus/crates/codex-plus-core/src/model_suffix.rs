@@ -182,6 +182,16 @@ pub fn build_model_catalog_json_with_template(
             model["priority"] = json!(1000 + index);
             model["visibility"] = json!("list");
             model["supported_in_api"] = json!(true);
+            model["default_reasoning_level"] = json!("medium");
+            model["supported_reasoning_levels"] = json!([
+                {"effort":"minimal","description":"极低推理"},
+                {"effort":"low","description":"轻度推理"},
+                {"effort":"medium","description":"中等推理"},
+                {"effort":"high","description":"高强度推理"},
+                {"effort":"xhigh","description":"极高推理"},
+                {"effort":"max","description":"最高推理"}
+            ]);
+            model["supports_reasoning_summaries"] = json!(true);
             model["additional_speed_tiers"] = json!([]);
             model["service_tiers"] = json!([]);
             model["availability_nux"] = Value::Null;

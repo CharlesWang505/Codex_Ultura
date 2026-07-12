@@ -1,5 +1,6 @@
 import { createDemoSnapshot } from './sampleData'
 import { isTauriRuntime, relayRequest } from './desktop'
+import { normalizeDurationValueMs } from './duration'
 import {
   asRecord,
   classifySource,
@@ -57,7 +58,7 @@ const ZERO_SUMMARY: UsageSummary = {
 const LOG_PAGE_SIZE = 100
 const MAX_LOG_ROWS = 30000
 const MAX_LOG_PAGES = Math.ceil(MAX_LOG_ROWS / LOG_PAGE_SIZE)
-const LOG_PAGE_CONCURRENCY = 6
+const LOG_PAGE_CONCURRENCY = 12
 
 export type UsageFetchRange = {
   startTimestamp: number
@@ -316,6 +317,35 @@ function extractLogTotal(value: unknown) {
   return total !== undefined && total >= 0 ? Math.floor(total) : undefined
 }
 
+function logPageRowIdentity(value: unknown, index: number) {
+  const record = asRecord(value)
+  const id = pickString(record, ['id', 'request_id', 'requestId'])
+  if (id) {
+    return `id:${id}`
+  }
+  return [
+    pickString(record, ['created_at', 'createdAt', 'time', 'timestamp']),
+    pickString(record, ['model_name', 'model', 'modelName']),
+    pickString(record, ['token_name', 'tokenName', 'key_name', 'keyName']),
+    index,
+  ].join('|')
+}
+
+function logPagesOverlap(leftValue: unknown, rightValue: unknown) {
+  const leftRows = extractList(leftValue)
+  const rightRows = extractList(rightValue)
+  if (!leftRows.length || !rightRows.length) {
+    return false
+  }
+
+  const leftIds = new Set(leftRows.map(logPageRowIdentity))
+  const overlap = rightRows.reduce<number>(
+    (count, row, index) => count + (leftIds.has(logPageRowIdentity(row, index)) ? 1 : 0),
+    0,
+  )
+  return overlap / Math.min(leftRows.length, rightRows.length) >= 0.8
+}
+
 function yieldToProgressPaint() {
   return new Promise<void>((resolve) => setTimeout(resolve, 0))
 }
@@ -365,10 +395,12 @@ async function fetchLogPages(
   const totalPages = reportedTotal !== undefined
     ? Math.min(MAX_LOG_PAGES, Math.ceil(Math.min(reportedTotal, MAX_LOG_ROWS) / LOG_PAGE_SIZE))
     : MAX_LOG_PAGES
+  let pageLimitExclusive = totalPages
+  let pageZeroAliasesPageOne = false
 
-  for (let page = 1; page < totalPages && loadedRows < MAX_LOG_ROWS; page += LOG_PAGE_CONCURRENCY) {
+  for (let page = 1; page < pageLimitExclusive && loadedRows < MAX_LOG_ROWS; page += LOG_PAGE_CONCURRENCY) {
     const pageIndexes = Array.from(
-      { length: Math.min(LOG_PAGE_CONCURRENCY, totalPages - page) },
+      { length: Math.min(LOG_PAGE_CONCURRENCY, pageLimitExclusive - page) },
       (_, offset) => page + offset,
     )
     const batch = await Promise.all(
@@ -380,10 +412,20 @@ async function fetchLogPages(
       })),
     )
 
+    if (page === 1 && batch[0]?.source.ok) {
+      pageZeroAliasesPageOne = logPagesOverlap(first.result.data, batch[0].result.data)
+      if (pageZeroAliasesPageOne) {
+        pageLimitExclusive = Math.min(MAX_LOG_PAGES + 1, totalPages + 1)
+      }
+    }
+
     let reachedLastPage = false
-    for (const next of batch) {
+    for (const [batchIndex, next] of batch.entries()) {
       if (!next.source.ok) {
         reachedLastPage = reportedTotal === undefined
+        continue
+      }
+      if (pageZeroAliasesPageOne && pageIndexes[batchIndex] === 1) {
         continue
       }
       const pageRows = extractList(next.result.data).length
@@ -393,18 +435,18 @@ async function fetchLogPages(
       }
       results.push(next.result)
       loadedRows += pageRows
-      if (onProgress) {
-        onProgress({
-          kind: 'logs',
-          logs: parseLogs(results, undefined, undefined, start, end),
-          loadedLogs: Math.min(loadedRows, MAX_LOG_ROWS),
-          totalLogs: totalRows,
-        })
-        await yieldToProgressPaint()
-      }
       if (pageRows < LOG_PAGE_SIZE) {
         reachedLastPage = true
       }
+    }
+    if (onProgress) {
+      onProgress({
+        kind: 'logs',
+        logs: parseLogs(results, undefined, undefined, start, end),
+        loadedLogs: Math.min(loadedRows, MAX_LOG_ROWS),
+        totalLogs: totalRows,
+      })
+      await yieldToProgressPaint()
     }
     if (reachedLastPage && reportedTotal === undefined) {
       break
@@ -1902,7 +1944,7 @@ const LATENCY_KEYS = [
   'costTime',
 ]
 
-const FIRST_TOKEN_KEYS = [
+const FIRST_TOKEN_DURATION_KEYS = [
   'frt_ms',
   'frtMs',
   'ttft_ms',
@@ -1928,8 +1970,6 @@ const FIRST_TOKEN_KEYS = [
   'firstTokenTime',
   'first_token_latency',
   'firstTokenLatency',
-  'first_response_time',
-  'firstResponseTime',
   'first_byte_time',
   'firstByteTime',
   'first_char_time',
@@ -1939,22 +1979,27 @@ const FIRST_TOKEN_KEYS = [
   'frt',
 ]
 
-const SECOND_DURATION_KEYS = new Set([
-  'usetime',
-  'usedtime',
-  'consumetime',
-  'completiontime',
-  'elapsedtime',
-  'firstresponsetime',
-  'firsttokentime',
-  'firsttokenlatency',
-  'firstbytetime',
-  'firstchartime',
-  'firstwordtime',
-  'timetofirsttoken',
-  'frt',
-  'ttft',
-])
+// New API / One API 的 first_response_time 在不同版本中有两种含义：
+// 一些版本返回首字耗时，另一些版本返回首包到达的 Unix 时间戳。
+const FIRST_TOKEN_TIMESTAMP_KEYS = [
+  'first_response_time',
+  'firstResponseTime',
+  'first_response_at',
+  'firstResponseAt',
+  'first_token_at',
+  'firstTokenAt',
+]
+
+const REQUEST_START_TIMESTAMP_KEYS = [
+  'created_at',
+  'createdAt',
+  'created_time',
+  'createdTime',
+  'started_at',
+  'startedAt',
+  'start_time',
+  'startTime',
+]
 
 const OUTPUT_TPS_KEYS = [
   'output_tps',
@@ -2031,21 +2076,27 @@ function formatFullTime(timestamp: number) {
   })
 }
 
-function normalizeDurationValueMs(key: string, value: number) {
-  const normalizedKey = key.toLowerCase()
-  const compactKey = normalizedKey.replace(/[^a-z0-9]/g, '')
-  const isMilliseconds = normalizedKey.includes('ms') || normalizedKey.includes('millisecond')
-  const isSeconds = normalizedKey.includes('second') || SECOND_DURATION_KEYS.has(compactKey)
-  const normalized = isMilliseconds ? value : isSeconds || value <= 30 ? value * 1000 : value
-  return Math.max(0, Math.round(normalized))
-}
-
 function normalizePickedDurationMs(records: PlainRecord[], keys: string[]) {
   const direct = pickNumberDeepWithKey(records, keys)
   if (direct) {
     return normalizeDurationValueMs(direct.key, direct.value)
   }
   return 0
+}
+
+function pickTimestampDeep(records: PlainRecord[], keys: string[]) {
+  for (const record of records) {
+    for (const key of keys) {
+      if (!(key in record)) {
+        continue
+      }
+      const parsed = parseTimestampValue(record[key])
+      if (parsed !== undefined) {
+        return parsed
+      }
+    }
+  }
+  return undefined
 }
 
 function normalizeLatencyMs(records: PlainRecord[]) {
@@ -2070,9 +2121,31 @@ function normalizeLatencyMs(records: PlainRecord[]) {
 }
 
 function normalizeFirstTokenMs(records: PlainRecord[], latencyMs: number) {
-  const direct = normalizePickedDurationMs(records, FIRST_TOKEN_KEYS)
+  const firstTokenTimestamp = pickTimestampDeep(records, FIRST_TOKEN_TIMESTAMP_KEYS)
+  const requestStartTimestamp = pickTimestampDeep(records, REQUEST_START_TIMESTAMP_KEYS)
+  if (
+    firstTokenTimestamp !== undefined &&
+    requestStartTimestamp !== undefined &&
+    firstTokenTimestamp > requestStartTimestamp
+  ) {
+    const elapsed = Math.max(0, Math.round(firstTokenTimestamp - requestStartTimestamp))
+    return latencyMs > 0 ? Math.min(elapsed, latencyMs) : elapsed
+  }
+
+  const timestampPick = pickNumberDeepWithKey(records, FIRST_TOKEN_TIMESTAMP_KEYS)
+  const timestampValue = timestampPick?.value ?? 0
+  const direct = normalizePickedDurationMs(records, FIRST_TOKEN_DURATION_KEYS)
   if (direct > 0) {
     return latencyMs > 0 ? Math.min(direct, latencyMs) : direct
+  }
+
+  // 兼容把 first_response_time 直接作为秒数或毫秒数返回的旧版本。
+  if (timestampPick && Math.abs(timestampValue) < 100_000_000) {
+    const legacyDuration = Math.max(
+      0,
+      Math.round(Math.abs(timestampValue) >= 1000 ? timestampValue : timestampValue * 1000),
+    )
+    return latencyMs > 0 ? Math.min(legacyDuration, latencyMs) : legacyDuration
   }
 
   return 0

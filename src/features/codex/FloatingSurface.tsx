@@ -70,6 +70,7 @@ function FloatingPanel() {
   const [reasoning, setReasoning] = useState('auto')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  const automaticRouting = Boolean(settings?.hotSwitchModelRoutingEnabled)
 
   const refresh = useCallback(async () => {
     try {
@@ -134,11 +135,12 @@ function FloatingPanel() {
         <span className={hot?.running ? 'online' : 'offline'} />
         <div><strong>{hot?.running ? '8787 网关运行中' : '8787 网关已关闭'}</strong><small>{hot?.baseUrl ?? 'http://127.0.0.1:8787/v1'}</small></div>
       </section>
-      <label><span>供应商 / Key</span><select value={relayId} onChange={(event) => setRelayId(event.target.value)}>{settings?.relayProfiles.filter((profile) => profile.relayMode !== 'aggregate').map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
-      <label><span>模型</span><input value={model} onChange={(event) => setModel(event.target.value)} list="floating-model-list" /><datalist id="floating-model-list">{settings?.hotSwitchModelMappings.map((mapping) => <option key={mapping.model} value={mapping.upstreamModel || mapping.model}>{mapping.model}</option>)}</datalist></label>
+      {automaticRouting ? <div className="floating-routing-hint">自动路由已开启：供应商和模型由 Codex 窗口内的模型选择器决定。</div> : null}
+      <label><span>{automaticRouting ? '回退供应商 / Key' : '供应商 / Key'}</span><select value={relayId} disabled={automaticRouting} onChange={(event) => setRelayId(event.target.value)}>{settings?.relayProfiles.filter((profile) => profile.relayMode !== 'aggregate').map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
+      <label><span>{automaticRouting ? '回退模型' : '模型'}</span><input value={model} disabled={automaticRouting} onChange={(event) => setModel(event.target.value)} list="floating-model-list" /><datalist id="floating-model-list">{settings?.hotSwitchModelMappings.map((mapping) => <option key={mapping.model} value={mapping.upstreamModel || mapping.model}>{mapping.model}</option>)}</datalist></label>
       <label><span>Reasoning</span><select value={reasoning} onChange={(event) => setReasoning(event.target.value)}><option value="auto">自动</option><option value="off">关闭</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select></label>
       <div className="floating-actions">
-        <button className="primary" type="button" disabled={busy} onClick={() => void apply()}><Save size={14} />应用并开启</button>
+        <button className="primary" type="button" disabled={busy} onClick={() => void apply()}><Save size={14} />{automaticRouting ? '保存并开启' : '应用并开启'}</button>
         <button type="button" disabled={busy} onClick={() => void toggleGateway()}><Power size={14} />{hot?.enabled ? '关闭' : '开启'}</button>
       </div>
       <button className="floating-open-main" type="button" onClick={() => void invoke('floating_show_main')}><ExternalLink size={14} />打开主程序</button>

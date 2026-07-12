@@ -1,4 +1,5 @@
-import { Save, Sparkles, Zap } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Layers3, Save, Sparkles, Zap } from 'lucide-react'
 import type { BackendSettings, HotSwitchMappingResult, HotSwitchModelMapping, HotSwitchResult } from '../types'
 import { CodexField, CodexPanel, LoadingButton, StatusPill } from '../shared/CodexPanel'
 import { ModelMappingEditor } from './ModelMappingEditor'
@@ -15,6 +16,7 @@ export function HotSwitchPage({
   onMappingsChange,
   onToggle,
   onScan,
+  onInject,
   onSaveMappings,
   onSaveSettings,
   onSetFloatingEnabled,
@@ -29,30 +31,49 @@ export function HotSwitchPage({
   onMappingsChange: (mappings: HotSwitchModelMapping[]) => void
   onToggle: (enabled: boolean) => void
   onScan: () => void
+  onInject: (relayIds: string[]) => void
   onSaveMappings: () => void
   onSaveSettings: () => void
   onSetFloatingEnabled: (enabled: boolean) => void
   onResetFloatingPosition: () => void
 }) {
+  const injectionProfiles = useMemo(
+    () => settings.relayProfiles.filter((profile) => profile.relayMode !== 'aggregate'),
+    [settings.relayProfiles],
+  )
+  const [selectedInjectionRelayIds, setSelectedInjectionRelayIds] = useState<string[]>(() => {
+    const mappedRelayIds = new Set(mappings.flatMap((mapping) => [mapping.relayId, ...(mapping.candidateRelayIds ?? [])]))
+    const mappedProfiles = injectionProfiles.filter((profile) => mappedRelayIds.has(profile.id)).map((profile) => profile.id)
+    return mappedProfiles.length ? mappedProfiles : injectionProfiles.map((profile) => profile.id)
+  })
   const validation = validateMappings(mappings, settings.relayProfiles)
   const enabled = Boolean(status?.enabled ?? settings.hotSwitchEnabled)
   const operationBusy = Boolean(busy)
-  const applying = busy === 'save-settings' || busy === 'save-mappings-before-hot' || busy === 'set-hot'
+  const savingSettings = busy === 'save-settings'
+  const applying = busy === 'save-mappings-before-hot' || busy === 'set-hot'
+  const automaticRouting = settings.hotSwitchModelRoutingEnabled
   const state = status?.error ? 'error' : status?.running ? 'running' : enabled ? 'waiting' : 'off'
   const stateLabel = state === 'error' ? '网关错误' : state === 'running' ? '网关运行中' : state === 'waiting' ? '配置已开启，进程未运行' : '配置已关闭'
   const stateTone = state === 'running' ? 'ok' : state === 'error' ? 'error' : state === 'waiting' ? 'warning' : 'info'
+  const selectedInjectionCount = selectedInjectionRelayIds.length
+
+  const toggleInjectionProfile = (relayId: string) => {
+    setSelectedInjectionRelayIds((current) => current.includes(relayId)
+      ? current.filter((id) => id !== relayId)
+      : [...current, relayId])
+  }
 
   return (
     <div className="codex-hot-switch-page">
       <CodexPanel title="8787 本地网关" icon={<Zap size={18} />} action={<StatusPill tone={stateTone}>{stateLabel}</StatusPill>}>
         {status?.error ? <div className="codex-hot-switch-error">{status.error}</div> : null}
         <div className="codex-form-grid">
-          <CodexField label="固定供应商">
-            <select value={settings.hotSwitchRelayId} disabled={operationBusy} onChange={(event) => onPatchSettings({ hotSwitchRelayId: event.target.value })}>
+          <CodexField label={automaticRouting ? '回退供应商' : '固定供应商'}>
+            <select value={settings.hotSwitchRelayId} disabled={operationBusy || automaticRouting} onChange={(event) => onPatchSettings({ hotSwitchRelayId: event.target.value })}>
               {settings.relayProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}{profile.relayMode === 'aggregate' ? '（聚合）' : ''}</option>)}
             </select>
           </CodexField>
-          <CodexField label="固定模型"><input value={settings.hotSwitchModel} disabled={operationBusy} onChange={(event) => onPatchSettings({ hotSwitchModel: event.target.value })} /></CodexField>
+          <CodexField label={automaticRouting ? '回退模型' : '固定模型'}><input value={settings.hotSwitchModel} disabled={operationBusy || automaticRouting} onChange={(event) => onPatchSettings({ hotSwitchModel: event.target.value })} /></CodexField>
           <CodexField label="默认推理强度">
             <select value={settings.defaultReasoning ?? 'auto'} disabled={operationBusy} onChange={(event) => onPatchSettings({ defaultReasoning: event.target.value })}>
               <option value="auto">自动</option><option value="off">关闭</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option>
@@ -64,8 +85,13 @@ export function HotSwitchPage({
             </select>
           </CodexField>
         </div>
+        {automaticRouting ? <p className="codex-result-text">模型自动路由开启后，以 Codex 窗口内选择的模型为准；这里的供应商和模型仅作为未匹配请求的回退目标。</p> : null}
         {!validation.valid && !enabled ? <p className="codex-result-text">映射规则仍有错误；修正后才能应用并开启自动路由。</p> : null}
+        <p className="codex-result-text">“保存配置”只保存本区设置，不会启动 8787 网关，也不会修改 Codex 当前配置。</p>
         <div className="codex-toolbar">
+          <LoadingButton busy={savingSettings} disabled={operationBusy} onClick={onSaveSettings}>
+            <Save size={14} />保存配置
+          </LoadingButton>
           <LoadingButton busy={applying} className={enabled ? 'danger' : 'primary'} disabled={operationBusy || (!enabled && settings.hotSwitchModelRoutingEnabled && !validation.valid)} onClick={() => onToggle(!enabled)}>
             <Zap size={14} />{enabled ? '关闭热切换' : '应用并开启'}
           </LoadingButton>
@@ -76,8 +102,41 @@ export function HotSwitchPage({
       <CodexPanel title="悬浮切换" icon={<Sparkles size={18} />}>
         <div className="codex-switch-row"><div><strong>悬浮球与快速切换面板</strong><span>开启后立即显示悬浮球；单击悬浮球打开快速切换面板。</span></div><button className={settings.floatingSwitchEnabled ? 'toggle on' : 'toggle'} type="button" role="switch" aria-label="悬浮切换面板" aria-checked={settings.floatingSwitchEnabled} disabled={operationBusy} onClick={() => onSetFloatingEnabled(!settings.floatingSwitchEnabled)}><span /></button></div>
         <div className="codex-toolbar">
-          <LoadingButton busy={busy === 'save-settings'} disabled={operationBusy} onClick={onSaveSettings}><Save size={14} />保存悬浮设置</LoadingButton>
+          <LoadingButton busy={savingSettings} disabled={operationBusy} onClick={onSaveSettings}><Save size={14} />保存悬浮设置</LoadingButton>
           <button type="button" disabled={operationBusy} onClick={onResetFloatingPosition}>恢复默认位置</button>
+        </div>
+      </CodexPanel>
+
+      <CodexPanel title="多供应商模型注入" icon={<Layers3 size={18} />} className="injection-panel">
+        <div className="codex-injection-intro">
+          <div>
+            <strong>把多个供应商的模型合并到 Codex 模型选择器</strong>
+            <span>勾选供应商后，一次完成获取模型、合并现有人工映射、写入 Codex 模型目录并开启 8787。之后以 Codex 内选择的模型为准，悬浮面板不再覆盖该选择。</span>
+          </div>
+          <StatusPill tone={enabled && settings.hotSwitchModelRoutingEnabled ? 'ok' : 'info'}>
+            {enabled && settings.hotSwitchModelRoutingEnabled ? `已生成 ${mappings.length} 个模型` : '尚未启用'}
+          </StatusPill>
+        </div>
+        <div className="codex-injection-profiles">
+          {injectionProfiles.map((profile) => (
+            <label key={profile.id} className={selectedInjectionRelayIds.includes(profile.id) ? 'selected' : ''}>
+              <input
+                type="checkbox"
+                checked={selectedInjectionRelayIds.includes(profile.id)}
+                disabled={operationBusy}
+                onChange={() => toggleInjectionProfile(profile.id)}
+              />
+              <span><strong>{profile.name}</strong><small>{profile.protocol}</small></span>
+            </label>
+          ))}
+        </div>
+        <div className="codex-toolbar">
+          <button type="button" disabled={operationBusy || selectedInjectionCount === injectionProfiles.length} onClick={() => setSelectedInjectionRelayIds(injectionProfiles.map((profile) => profile.id))}>全选</button>
+          <button type="button" disabled={operationBusy || !selectedInjectionCount} onClick={() => setSelectedInjectionRelayIds([])}>清空</button>
+          <LoadingButton busy={busy === 'inject-models'} className="primary" disabled={operationBusy || !selectedInjectionCount} onClick={() => onInject(selectedInjectionRelayIds)}>
+            <Layers3 size={14} />{enabled ? '重新生成并更新 Codex' : '生成模型列表并开启'}
+          </LoadingButton>
+          <span className="codex-result-text">已选择 {selectedInjectionCount} / {injectionProfiles.length} 个供应商</span>
         </div>
       </CodexPanel>
 

@@ -243,7 +243,7 @@ OPENAI_API_KEY = "sk-should-be-removed"
 name = "custom"
 wire_api = "responses"
 requires_openai_auth = true
-base_url = "http://192.168.188.245:3001/v1"
+base_url = "http://192.0.2.10:3001/v1"
 experimental_bearer_token = "sk-test-redacted"
 "#,
     )
@@ -297,7 +297,7 @@ model_provider = "custom1"
 name = "custom1"
 wire_api = "responses"
 requires_openai_auth = true
-base_url = "http://192.168.188.245:3001/v1"
+base_url = "http://192.0.2.10:3001/v1"
 [profiles.default]
 model = "gpt-5-mini"
 "#,
@@ -569,12 +569,9 @@ fn apply_pure_api_config_switches_auth_json_and_writes_provider_token() {
     .unwrap();
     std::fs::write(temp.path().join("config.toml"), r#"model = "gpt-5""#).unwrap();
 
-    let result = apply_pure_api_config_to_home(
-        temp.path(),
-        "http://192.168.188.245:3001/v1",
-        "sk-test-redacted",
-    )
-    .unwrap();
+    let result =
+        apply_pure_api_config_to_home(temp.path(), "http://192.0.2.10:3001/v1", "sk-test-redacted")
+            .unwrap();
 
     let auth: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(temp.path().join("auth.json")).unwrap())
@@ -591,7 +588,7 @@ fn apply_pure_api_config_switches_auth_json_and_writes_provider_token() {
     assert!(config.contains(r#"name = "custom""#));
     assert!(config.contains(r#"wire_api = "responses""#));
     assert!(config.contains("requires_openai_auth = true"));
-    assert!(config.contains(r#"base_url = "http://192.168.188.245:3001/v1""#));
+    assert!(config.contains(r#"base_url = "http://192.0.2.10:3001/v1""#));
     assert!(config.contains(r#"experimental_bearer_token = "sk-test-redacted""#));
 }
 
@@ -1091,7 +1088,7 @@ enabled = true
 }
 
 #[test]
-fn apply_relay_profile_does_not_write_model_catalog_json_for_selected_models() {
+fn apply_relay_profile_writes_model_catalog_json_for_selected_models() {
     let temp = tempfile::tempdir().unwrap();
     let profile = RelayProfile {
         id: "relay-a".to_string(),
@@ -1120,10 +1117,14 @@ experimental_bearer_token = "sk-new"
     apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap();
 
     let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
-    assert!(!config.contains("model_catalog_json"));
+    assert!(config.contains(r#"model_catalog_json = "model-catalogs/relay-a.json""#));
     assert!(config.contains("model_context_window = 200000"));
     assert!(config.contains("model_auto_compact_token_limit = 160000"));
-    assert!(!temp.path().join("model-catalogs").exists());
+    let catalog =
+        std::fs::read_to_string(temp.path().join("model-catalogs").join("relay-a.json")).unwrap();
+    assert!(catalog.contains(r#""slug": "deepseek-coder""#));
+    assert!(catalog.contains(r#""slug": "qwen3-coder""#));
+    assert!(catalog.contains(r#""effort": "max""#));
 }
 
 #[test]
@@ -2421,7 +2422,7 @@ disable_response_storage = true
 
 [model_providers.max_ai]
 name = "max_ai"
-base_url = "https://max2.jojocode.com/v1"
+base_url = "https://relay.example/v1"
 wire_api = "responses"
 requires_openai_auth = true
 "#
@@ -2438,7 +2439,7 @@ requires_openai_auth = true
     assert!(config.contains(r#"model_provider = "max_ai""#));
     assert!(config.contains("[model_providers.max_ai]"));
     assert!(config.contains(r#"name = "max_ai""#));
-    assert!(config.contains(r#"base_url = "https://max2.jojocode.com/v1""#));
+    assert!(config.contains(r#"base_url = "https://relay.example/v1""#));
     assert!(!config.contains("experimental_bearer_token"));
     assert!(!config.contains("[model_providers.custom]"));
 }
@@ -2474,7 +2475,7 @@ js_repl = false
 
 [model_providers.max_ai]
 name = "max_ai"
-base_url = "https://max2.jojocode.com/v1"
+base_url = "https://relay.example/v1"
 wire_api = "responses"
 requires_openai_auth = true
 "#
@@ -2525,7 +2526,7 @@ js_repl = false
 
 [model_providers.max_ai]
 name = "max_ai"
-base_url = "https://max2.jojocode.com/v1"
+base_url = "https://relay.example/v1"
 wire_api = "responses"
 requires_openai_auth = true
 "#
@@ -2742,7 +2743,7 @@ model_provider = "custom"
 name = "custom"
 wire_api = "responses"
 requires_openai_auth = true
-base_url = "http://192.168.188.245:3001/v1"
+base_url = "http://192.0.2.10:3001/v1"
 "#
         .to_string(),
         auth_contents: "{}".to_string(),
@@ -2755,7 +2756,7 @@ base_url = "http://192.168.188.245:3001/v1"
     assert!(config.contains(r#"model = "gpt-5.5""#));
     assert!(config.contains(r#"model_provider = "custom""#));
     assert!(config.contains("[model_providers.custom]"));
-    assert!(config.contains(r#"base_url = "http://192.168.188.245:3001/v1""#));
+    assert!(config.contains(r#"base_url = "http://192.0.2.10:3001/v1""#));
 }
 
 #[test]
@@ -2776,7 +2777,7 @@ model_provider = "custom"
 name = "custom"
 wire_api = "responses"
 requires_openai_auth = true
-base_url = "http://192.168.188.245:3001/v1"
+base_url = "http://192.0.2.10:3001/v1"
 experimental_bearer_token = "sk-provider-token"
 "#
         .to_string(),
@@ -2875,7 +2876,7 @@ model_provider = "custom"
 name = "custom"
 wire_api = "responses"
 requires_openai_auth = true
-base_url = "http://192.168.188.245:3001/v1"
+base_url = "http://192.0.2.10:3001/v1"
 "#;
     let common = r#"model_reasoning_effort = "high"
 
@@ -2895,7 +2896,7 @@ command = "python"
     assert!(stripped.contains(r#"model = "gpt-5.5""#));
     assert!(stripped.contains(r#"model_provider = "custom""#));
     assert!(stripped.contains("[model_providers.custom]"));
-    assert!(stripped.contains(r#"base_url = "http://192.168.188.245:3001/v1""#));
+    assert!(stripped.contains(r#"base_url = "http://192.0.2.10:3001/v1""#));
 }
 
 #[test]
@@ -2933,7 +2934,7 @@ experimental_bearer_token = "sk-old"
     let mut relay = RelayProfile {
         id: "relay-a".to_string(),
         model: "gpt-5.4".to_string(),
-        base_url: "https://max2.jojocode.com/v1".to_string(),
+        base_url: "https://relay.example/v1".to_string(),
         api_key: "sk-new".to_string(),
         relay_mode: RelayMode::PureApi,
         config_contents: r#"[model_providers.custom]
@@ -2951,7 +2952,7 @@ experimental_bearer_token = "sk-new"
     assert!(config.contains(r#"model_provider = "custom""#));
     assert!(config.contains("[model_providers.custom]"));
     assert!(config.contains(r#"name = "custom""#));
-    assert!(config.contains(r#"base_url = "https://max2.jojocode.com/v1""#));
+    assert!(config.contains(r#"base_url = "https://relay.example/v1""#));
     assert!(config.contains(r#"wire_api = "responses""#));
     assert!(config.contains("requires_openai_auth = true"));
     assert!(!config.contains("experimental_bearer_token"));
@@ -3032,7 +3033,7 @@ experimental_bearer_token = "sk-new"
 }
 
 #[test]
-fn apply_relay_profile_no_catalog_when_model_list_has_no_suffix() {
+fn apply_relay_profile_generates_catalog_when_model_list_has_no_suffix() {
     let temp = tempfile::tempdir().unwrap();
     let profile = RelayProfile {
         id: "relay-a".to_string(),
@@ -3061,9 +3062,12 @@ experimental_bearer_token = "sk-new"
     apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap();
 
     let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
-    assert!(!config.contains("model_catalog_json"));
+    assert!(config.contains(r#"model_catalog_json = "model-catalogs/relay-a.json""#));
     assert!(config.contains("model_context_window = 200000"));
-    assert!(!temp.path().join("model-catalogs").exists());
+    let catalog =
+        std::fs::read_to_string(temp.path().join("model-catalogs").join("relay-a.json")).unwrap();
+    assert!(catalog.contains(r#""slug": "deepseek-coder""#));
+    assert!(catalog.contains(r#""context_window": 200000"#));
 }
 
 #[test]
@@ -3389,4 +3393,36 @@ experimental_bearer_token = "sk-new"
         "1000000"
     );
     assert!(!windows.contains_key("deepseek-v4-pro"));
+}
+
+#[test]
+fn normalize_prefers_edited_model_over_stale_config_model() {
+    let original_model_list = "gpt-5.5\ngpt-5.4\ngpt-5.3-codex";
+    let mut profile = RelayProfile {
+        id: "relay-model-save".to_string(),
+        name: "Model Save".to_string(),
+        model: "gpt-5.5".to_string(),
+        relay_mode: RelayMode::PureApi,
+        config_contents: r#"model = "gpt-5.2"
+model_provider = "custom"
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "https://relay.example/v1"
+experimental_bearer_token = "sk-new"
+"#
+        .to_string(),
+        auth_contents: r#"{"OPENAI_API_KEY":"sk-new"}"#.to_string(),
+        model_list: original_model_list.to_string(),
+        ..RelayProfile::default()
+    };
+
+    normalize_relay_profile_for_storage(&mut profile).unwrap();
+
+    assert_eq!(profile.model, "gpt-5.5");
+    assert!(profile.config_contents.contains(r#"model = "gpt-5.5""#));
+    assert!(!profile.config_contents.contains(r#"model = "gpt-5.2""#));
+    assert_eq!(profile.model_list, original_model_list);
 }

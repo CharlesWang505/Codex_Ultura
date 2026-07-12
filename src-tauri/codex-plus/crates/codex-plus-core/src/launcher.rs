@@ -1223,7 +1223,10 @@ async fn handle_models_proxy_connection(
     let settings = crate::settings::SettingsStore::default()
         .load()
         .unwrap_or_default();
-    if let Some(payload) = crate::hot_switch_mapping::hot_switch_models_api_payload(&settings) {
+    let codex_catalog_format = path.contains("client_version=");
+    if let Some(payload) =
+        crate::hot_switch_mapping::hot_switch_models_api_payload(&settings, codex_catalog_format)
+    {
         let body = serde_json::to_vec(&payload)?;
         write_http_response(stream, "200 OK", "application/json; charset=utf-8", &body).await?;
         log_helper_response(

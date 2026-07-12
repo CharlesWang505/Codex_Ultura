@@ -85,10 +85,15 @@ pub fn build_mapping_scan(
         .into_iter()
         .map(|profile| profile.id)
         .collect::<HashSet<_>>();
-    let previous = settings
+    let previous_by_alias = settings
         .hot_switch_model_mappings
         .iter()
         .map(|mapping| (mapping.model.as_str(), mapping))
+        .collect::<HashMap<_, _>>();
+    let previous_by_upstream = settings
+        .hot_switch_model_mappings
+        .iter()
+        .map(|mapping| (mapping.upstream_model.as_str(), mapping))
         .collect::<HashMap<_, _>>();
     let mut candidates = HashMap::<String, Vec<String>>::new();
 
@@ -130,7 +135,13 @@ pub fn build_mapping_scan(
                     .unwrap_or(usize::MAX)
             });
             relay_ids.dedup();
-            let old = previous.get(model.as_str()).copied();
+            // 用户可以把 Codex 中显示的模型名改成别名。重新扫描时应按真实上游
+            // 模型找到旧规则，而不是只按已经改过的别名匹配。
+            let old = previous_by_upstream
+                .get(model.as_str())
+                .copied()
+                .filter(|mapping| relay_ids.contains(&mapping.relay_id))
+                .or_else(|| previous_by_alias.get(model.as_str()).copied());
             let relay_id = old
                 .filter(|mapping| relay_ids.contains(&mapping.relay_id))
                 .map(|mapping| mapping.relay_id.clone())
@@ -142,7 +153,10 @@ pub fn build_mapping_scan(
                 .map(|mapping| mapping.upstream_model.clone())
                 .unwrap_or_else(|| model.clone());
             Some(HotSwitchModelMapping {
-                model,
+                model: old
+                    .filter(|mapping| !mapping.model.trim().is_empty())
+                    .map(|mapping| mapping.model.clone())
+                    .unwrap_or_else(|| model.clone()),
                 upstream_model,
                 relay_id,
                 candidate_relay_ids: relay_ids,
@@ -241,12 +255,21 @@ pub fn hot_switch_catalog_entries(settings: &BackendSettings) -> Vec<ModelCatalo
     if !settings.hot_switch_model_routing_enabled {
         return Vec::new();
     }
+    let provider_names = settings
+        .relay_profiles
+        .iter()
+        .map(|profile| (profile.id.as_str(), profile.name.as_str()))
+        .collect::<HashMap<_, _>>();
     settings
         .hot_switch_model_mappings
         .iter()
         .map(|mapping| ModelCatalogEntry {
             slug: mapping.model.clone(),
-            display_name: mapping.model.clone(),
+            display_name: provider_names
+                .get(mapping.relay_id.as_str())
+                .filter(|name| !name.trim().is_empty())
+                .map(|name| format!("{} · {}", mapping.model, name))
+                .unwrap_or_else(|| mapping.model.clone()),
             suffix_window: mapping_context_window(settings, mapping),
         })
         .collect()
@@ -262,12 +285,22 @@ pub fn hot_switch_default_model(settings: &BackendSettings) -> Option<String> {
         .map(|mapping| mapping.model.clone())
 }
 
-pub fn hot_switch_models_api_payload(settings: &BackendSettings) -> Option<Value> {
+pub fn hot_switch_models_api_payload(
+    settings: &BackendSettings,
+    codex_catalog_format: bool,
+) -> Option<Value> {
     if !settings.hot_switch_enabled
         || !settings.hot_switch_model_routing_enabled
         || settings.hot_switch_model_mappings.is_empty()
     {
         return None;
+    }
+    if codex_catalog_format {
+        let entries = hot_switch_catalog_entries(settings);
+        return serde_json::from_str(&crate::model_suffix::build_model_catalog_json(
+            &entries, None,
+        ))
+        .ok();
     }
     let data = settings
         .hot_switch_model_mappings
@@ -282,7 +315,8 @@ pub fn hot_switch_models_api_payload(settings: &BackendSettings) -> Option<Value
             json!({
                 "id": mapping.model,
                 "object": "model",
-                "owned_by": owner
+                "owned_by": owner,
+                "display_name": format!("{} · {}", mapping.model, owner)
             })
         })
         .collect::<Vec<_>>();
@@ -424,6 +458,34 @@ mod tests {
     }
 
     #[test]
+    fn mapping_scan_preserves_custom_codex_alias() {
+        let settings = BackendSettings {
+            relay_profiles: vec![profile("a", "A")],
+            hot_switch_model_mappings: vec![HotSwitchModelMapping {
+                model: "my-claude".to_string(),
+                upstream_model: "claude-opus-4-5".to_string(),
+                relay_id: "a".to_string(),
+                candidate_relay_ids: vec!["a".to_string()],
+                ..HotSwitchModelMapping::default()
+            }],
+            ..BackendSettings::default()
+        };
+        let scan = build_mapping_scan(
+            &settings,
+            vec![HotSwitchProviderScan {
+                relay_id: "a".to_string(),
+                relay_name: "A".to_string(),
+                endpoint: String::new(),
+                models: vec!["claude-opus-4-5".to_string()],
+                error: String::new(),
+            }],
+        );
+
+        assert_eq!(scan.mappings[0].model, "my-claude");
+        assert_eq!(scan.mappings[0].upstream_model, "claude-opus-4-5");
+    }
+
+    #[test]
     fn resolver_uses_codex_model_to_choose_provider_and_upstream_model() {
         let settings = BackendSettings {
             hot_switch_enabled: true,
@@ -466,10 +528,26 @@ mod tests {
             ..BackendSettings::default()
         };
 
-        let payload = hot_switch_models_api_payload(&settings).unwrap();
+        let payload = hot_switch_models_api_payload(&settings, false).unwrap();
 
         assert_eq!(payload["object"], "list");
         assert_eq!(payload["data"][0]["id"], "codex-choice");
         assert_eq!(payload["data"][0]["owned_by"], "Provider A");
+        assert_eq!(
+            payload["data"][0]["display_name"],
+            "codex-choice · Provider A"
+        );
+
+        let catalog = hot_switch_models_api_payload(&settings, true).unwrap();
+        assert_eq!(catalog["models"][0]["slug"], "codex-choice");
+        assert_eq!(
+            catalog["models"][0]["display_name"],
+            "codex-choice · Provider A"
+        );
+        assert!(
+            catalog["models"][0]["supported_reasoning_levels"]
+                .as_array()
+                .is_some_and(|levels| levels.iter().any(|level| level["effort"] == "max"))
+        );
     }
 }

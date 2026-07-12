@@ -110,23 +110,37 @@
 .codex-notice {
   position: sticky;
   z-index: 8;
-  top: 0;
+  top: 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
+  width: min(720px, calc(100% - 32px));
+  min-height: 48px;
+  margin: 0 auto 12px;
+  padding: 11px 14px;
+  box-sizing: border-box;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--bg-modal);
   backdrop-filter: var(--glass-blur);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+}
+
+.codex-notice > span {
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .codex-notice.ok { color: var(--ok-text); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
 .codex-notice.warning { color: var(--warn-text); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
 .codex-notice.error { color: var(--danger-text); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
 .codex-notice.info { color: var(--info-text); }
-.codex-notice button { min-height: 26px; padding: 0 8px; }
+.codex-notice button { flex: 0 0 auto; min-width: 30px; min-height: 30px; padding: 0 8px; }
 
 .codex-dialog-backdrop {
   position: fixed;
@@ -328,6 +342,115 @@
 }
 
 .codex-provider-list small { color: var(--text-muted); }
+
+.codex-provider-guide {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent-border);
+  border-radius: 10px;
+  background: var(--accent-bg);
+}
+
+.codex-provider-guide > strong { color: var(--text-strong); }
+
+.codex-provider-guide ol {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: provider-step;
+}
+
+.codex-provider-guide li {
+  counter-increment: provider-step;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.codex-provider-guide li::before {
+  content: counter(provider-step);
+  display: grid;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 50%;
+  color: white;
+  background: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.codex-provider-basic-grid { margin-bottom: 12px; }
+
+.codex-provider-advanced,
+.codex-provider-secondary-actions,
+.codex-provider-maintenance {
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--bg-panel-soft);
+}
+
+.codex-provider-advanced { margin-top: 4px; }
+
+.codex-provider-advanced > summary,
+.codex-provider-maintenance > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.codex-provider-advanced > summary::-webkit-details-marker,
+.codex-provider-secondary-actions > summary::-webkit-details-marker,
+.codex-provider-maintenance > summary::-webkit-details-marker { display: none; }
+
+.codex-provider-advanced > summary span,
+.codex-provider-maintenance > summary span { color: var(--text-strong); font-weight: 650; }
+.codex-provider-advanced > summary small,
+.codex-provider-maintenance > summary small { color: var(--text-muted); text-align: right; }
+.codex-provider-advanced[open] > summary,
+.codex-provider-maintenance[open] > summary { border-bottom: 1px solid var(--border-soft); }
+.codex-provider-advanced > .codex-form-grid { padding: 14px; }
+
+.codex-provider-primary-actions {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.codex-provider-primary-actions > small,
+.codex-provider-maintenance-hint { color: var(--text-muted); font-size: 11px; line-height: 1.55; }
+
+.codex-provider-secondary-actions {
+  width: fit-content;
+  margin-top: 10px;
+  background: transparent;
+}
+
+.codex-provider-secondary-actions > summary {
+  padding: 8px 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  list-style: none;
+}
+
+.codex-provider-secondary-actions > .codex-toolbar { padding: 0 10px 10px; }
+
+.codex-provider-maintenance > summary { min-height: 52px; }
+.codex-provider-maintenance-body { display: grid; gap: 12px; padding: 14px; }
+.codex-provider-maintenance-hint { margin: -2px 0 0; }
 
 .codex-lock-banner {
   display: flex;
@@ -682,6 +805,17 @@
   .codex-provider-list {
     grid-template-columns: 1fr;
   }
+
+  .codex-provider-guide ol { grid-template-columns: 1fr; }
+
+  .codex-provider-advanced > summary,
+  .codex-provider-maintenance > summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .codex-provider-advanced > summary small,
+  .codex-provider-maintenance > summary small { text-align: left; }
 
   .codex-field.wide { grid-column: auto; }
 

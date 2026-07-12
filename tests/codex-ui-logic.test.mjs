@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { validateMappings } from '../src/features/codex/hotSwitch/mappingValidation.ts'
 import { setContextEnabled } from '../src/features/codex/context/contextTypes.ts'
+import { normalizeDurationValueMs } from '../src/lib/duration.ts'
 import { buildTimeWindow, DAY_MS } from '../src/lib/timeWindow.ts'
 
 const profiles = [
@@ -71,4 +72,14 @@ test('custom window remains fixed when refresh time advances', () => {
 
   assert.deepEqual(second, first)
   assert.equal(first.valid, true)
+})
+
+test('usage log keeps New API frt values in milliseconds', () => {
+  assert.equal(normalizeDurationValueMs('frt', 3136), 3136)
+  assert.equal(normalizeDurationValueMs('ttft', 3339), 3339)
+})
+
+test('usage log still accepts fractional frt values in seconds', () => {
+  assert.equal(normalizeDurationValueMs('frt', 3.339), 3339)
+  assert.equal(normalizeDurationValueMs('ttft', 3.136), 3136)
 })
