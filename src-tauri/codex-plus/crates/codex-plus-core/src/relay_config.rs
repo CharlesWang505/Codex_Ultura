@@ -2577,7 +2577,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(
             temp.path().join("config.toml"),
-            "model_provider = \"custom\"\nmodel = \"gpt-image-2\"\n\n[model_providers.custom]\nname = \"custom\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"https://image-relay.example\"\n",
+            "model_provider = \"custom\"\nmodel = \"gpt-image-2\"\n\n[model_providers.custom]\nname = \"custom\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"https://ahg.codes\"\n",
         )
         .unwrap();
         std::fs::write(temp.path().join("auth.json"), "{}\n").unwrap();
@@ -2585,7 +2585,7 @@ mod tests {
         let mut profile = RelayProfile {
             relay_mode: crate::settings::RelayMode::PureApi,
             protocol: crate::settings::RelayProtocol::Responses,
-            config_contents: "model_provider = \"ai\"\nmodel = \"gpt-image-2\"\n\n[model_providers.ai]\nname = \"ai\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"https://image-relay.example\"\n"
+            config_contents: "model_provider = \"ai\"\nmodel = \"gpt-image-2\"\n\n[model_providers.ai]\nname = \"ai\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"https://ahg.codes\"\n"
                 .to_string(),
             auth_contents: "{}\n".to_string(),
             ..RelayProfile::default()

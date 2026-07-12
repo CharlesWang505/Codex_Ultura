@@ -121,7 +121,7 @@ pub fn setup_tray(app: &mut App) -> tauri::Result<()> {
 
     let mut builder = TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
-        .tooltip("Codex_Ultura")
+        .tooltip("Codex Compass · 法典指南针")
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             TRAY_SHOW_ID => show_main_window(app),

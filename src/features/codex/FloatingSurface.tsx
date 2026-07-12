@@ -128,7 +128,7 @@ function FloatingPanel() {
   return (
     <main className="floating-panel-shell">
       <header>
-        <div><Radio size={16} /><strong>Codex_Ultura 热切换</strong></div>
+        <div><Radio size={16} /><strong>Codex Compass 热切换</strong></div>
         <button type="button" onClick={() => void invoke('floating_hide_panel')}>×</button>
       </header>
       <section className="floating-gateway-state">

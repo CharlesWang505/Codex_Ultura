@@ -507,7 +507,7 @@ async fn user_script_manager_scans_and_persists_inventory_shape() {
     assert_eq!(listed["scripts"][0]["key"], "builtin:demo.js");
     assert_eq!(listed["scripts"][0]["source"], "builtin");
     assert_eq!(listed["scripts"][0]["enabled"], true);
-    assert_eq!(listed["scripts"][0]["status"], "not_loaded");
+    assert_eq!(listed["scripts"][0]["status"], "pending_restart");
     assert_eq!(listed["scripts"][0]["error"], "");
     assert_eq!(listed["scripts"][1]["key"], "user:a.js");
     assert_eq!(disabled["enabled"], false);

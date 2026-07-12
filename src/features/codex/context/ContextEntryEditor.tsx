@@ -21,7 +21,7 @@ export function ContextEntryEditor({
   return (
     <section className="codex-context-editor" aria-label={draft.editing ? '编辑配置' : '新增配置'}>
       <header>
-        <div><strong>{draft.editing ? '编辑配置' : '新增配置'}</strong><span>保存后会进入 Codex_Ultura 的统一 Codex 配置。</span></div>
+        <div><strong>{draft.editing ? '编辑配置' : '新增配置'}</strong><span>保存后会进入 Codex Compass 的统一 Codex 配置。</span></div>
         <button type="button" aria-label="关闭编辑器" disabled={busy} onClick={onCancel}><X size={16} /></button>
       </header>
       <div className="codex-form-grid single">

@@ -1,10 +1,10 @@
-# Codex_Ultura notices
+# Codex Compass notices
 
-Codex_Ultura includes original work and modified third-party work.
+Codex Compass includes original work and modified third-party work.
 
-## Codex_Ultura
+## Codex Compass
 
-Copyright (C) 2026 Codex_Ultura contributors.
+Copyright (C) 2026 Codex Compass contributors.
 
 Licensed under GNU Affero General Public License v3.0 only.
 

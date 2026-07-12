@@ -685,25 +685,13 @@ fn default_user_script_manager() -> UserScriptManager {
     let config_dir = default_user_scripts_config_dir();
     UserScriptManager::new(
         builtin_user_scripts_dir(),
-        config_dir.join("user_scripts"),
+        config_dir.clone(),
         config_dir.join("user_scripts.json"),
     )
 }
 
 fn default_user_scripts_config_dir() -> PathBuf {
-    if cfg!(windows) {
-        if let Some(roaming) = std::env::var_os("APPDATA") {
-            return PathBuf::from(roaming).join("Codex_Plus");
-        }
-        if let Some(home) = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf()) {
-            return home.join("AppData").join("Roaming").join("Codex_Plus");
-        }
-    }
-    std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| directories::BaseDirs::new().map(|dirs| dirs.home_dir().join(".config")))
-        .unwrap_or_else(|| PathBuf::from(".config"))
-        .join("Codex_Plus")
+    codex_plus_core::paths::default_app_state_dir().join("scripts")
 }
 
 #[cfg(test)]
@@ -754,6 +742,14 @@ mod tests {
         assert!(source.contains("async fn start_computer_use_guard_watchdog"));
         assert!(source.contains("self.core"));
         assert!(source.contains(".start_computer_use_guard_watchdog(settings)"));
+    }
+
+    #[test]
+    fn launcher_reads_user_scripts_from_unified_app_state_directory() {
+        assert_eq!(
+            default_user_scripts_config_dir(),
+            codex_plus_core::paths::default_app_state_dir().join("scripts")
+        );
     }
 
     #[test]

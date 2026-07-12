@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Codex_Ultura",
+  "productName": "Codex Compass",
   "version": "../package.json",
   "identifier": "chat.ai-api.relay-meter",
   "build": {
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Codex_Ultura",
+        "title": "Codex Compass · 法典指南针",
         "width": 1440,
         "height": 940,
         "minWidth": 1180,

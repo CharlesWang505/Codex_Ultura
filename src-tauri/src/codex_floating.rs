@@ -20,7 +20,7 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
             "floating-ball",
             WebviewUrl::App("index.html?surface=floating".into()),
         )
-        .title("Codex_Ultura 热切换")
+        .title("Codex Compass 热切换")
         .inner_size(BALL_SIZE, BALL_SIZE)
         .position(position.x as f64, position.y as f64)
         .decorations(false)
@@ -39,7 +39,7 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
             "floating-panel",
             WebviewUrl::App("index.html?surface=floating-panel".into()),
         )
-        .title("Codex_Ultura 热切换")
+        .title("Codex Compass 热切换")
         .inner_size(PANEL_WIDTH, PANEL_HEIGHT)
         .decorations(false)
         .transparent(true)

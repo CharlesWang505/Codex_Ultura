@@ -628,7 +628,7 @@ mod tests {
     #[test]
     fn registration_status_distinguishes_missing_drifted_and_valid_entries() {
         let temp = tempfile::tempdir().unwrap();
-        let executable = temp.path().join("Codex_Ultura.exe");
+        let executable = temp.path().join("Codex Compass.exe");
         std::fs::write(&executable, b"").unwrap();
         let expected = format!(
             "\"{}\" --watcher --hidden --debug-port 9239",
@@ -656,7 +656,7 @@ mod tests {
     #[test]
     fn watcher_spawn_failure_is_returned_to_the_caller() {
         let missing = std::env::temp_dir().join(format!(
-            "missing-codex-ultura-{}-{}.exe",
+            "missing-codex-compass-{}-{}.exe",
             std::process::id(),
             now_unix_ms()
         ));

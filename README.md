@@ -1,10 +1,10 @@
-# Codex_Ultura
+# Codex Compass（法典指南针）
 
-Codex_Ultura 是一款基于 Tauri 2、Rust、React 19 和 TypeScript 的 Windows 桌面工具，把 **New API / One API 账户监控、Codex 管理、8787 模型热切换和代理节点测速** 集中在一个应用中。
+Codex Compass（中文名：法典指南针）是一款基于 Tauri 2、Rust、React 19 和 TypeScript 的 Windows 桌面工具，把 **New API / One API 账户监控、Codex 管理、8787 模型热切换和代理节点测速** 集中在一个应用中。
 
 本项目参考并基于 [CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus) 与 [codex-api-hot-switch](https://github.com/BandengHu/codex-api-hot-switch) 的部分功能进行整合和完善，目标是让用户通过一个配套软件完成中转站查看、供应商配置、模型注入、热切换和常用 Codex 维护。
 
-从 [GitHub Releases](https://github.com/CharlesWang505/Codex_Ultura/releases/latest) 下载最新版安装包，完整操作说明见 [Codex_Ultura 使用手册](./docs/USER_MANUAL.md)。
+从 [GitHub Releases](https://github.com/CharlesWang505/Codex_Ultura/releases/latest) 下载最新版安装包，完整操作说明见 [Codex Compass 使用手册](./docs/USER_MANUAL.md)。
 
 > **先记住这个隐藏按钮：左上角的闪电图标不是装饰。点击它可以启动 Codex；Codex 已在运行时，点击它会重启 Codex。** 重新生成模型目录或更新注入模型后，需要点击这个按钮让新目录生效。
 
@@ -24,7 +24,7 @@ Codex_Ultura 是一款基于 Tauri 2、Rust、React 19 和 TypeScript 的 Window
 
 ### 2. Codex 管理与 8787 热切换
 
-Codex_Ultura 可以管理多套上游 API 供应商和 Key，将选定模型注入 Codex，并通过本地网关实现模型路由：
+Codex Compass 可以管理多套上游 API 供应商和 Key，将选定模型注入 Codex，并通过本地网关实现模型路由：
 
 ```text
 Codex
@@ -201,7 +201,7 @@ npm run build:tauri
 主要输出：
 
 ```text
-src-tauri/target/release/codex-ultura.exe
+src-tauri/target/release/codex-compass.exe
 src-tauri/target/release/bundle/nsis/
 ```
 
@@ -209,7 +209,7 @@ src-tauri/target/release/bundle/nsis/
 
 完整版本记录见 [CHANGELOG.md](./CHANGELOG.md)，第三方组件与来源见 [NOTICE.md](./NOTICE.md) 和 [docs/THIRD_PARTY_NOTICES.md](./docs/THIRD_PARTY_NOTICES.md)。
 
-Codex_Ultura 以 [GNU Affero General Public License v3.0](./LICENSE) 发布，SPDX 标识为 `AGPL-3.0-only`。本项目包含并修改了 CodexPlusPlus 的部分代码，分发修改后的程序或通过网络提供修改后的版本时，必须遵守 AGPLv3 的对应源代码提供要求。
+Codex Compass 以 [GNU Affero General Public License v3.0](./LICENSE) 发布，SPDX 标识为 `AGPL-3.0-only`。本项目包含并修改了 CodexPlusPlus 的部分代码，分发修改后的程序或通过网络提供修改后的版本时，必须遵守 AGPLv3 的对应源代码提供要求。
 
 OpenAI、ChatGPT、Codex 以及其他第三方名称和商标归各自权利人所有。
 

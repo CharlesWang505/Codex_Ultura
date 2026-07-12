@@ -12,7 +12,7 @@ export function RootSurface() {
 
   return (
     <AppErrorBoundary>
-      <Suspense fallback={<main className="app-startup-shell"><span /><strong>Codex_Ultura</strong></main>}>
+      <Suspense fallback={<main className="app-startup-shell"><span /><strong>Codex Compass · 法典指南针</strong></main>}>
         {content}
       </Suspense>
     </AppErrorBoundary>

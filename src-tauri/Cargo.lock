@@ -419,6 +419,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-compass"
+version = "1.3.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "codex-plus-core",
+ "codex-plus-data",
+ "codex-plus-launcher",
+ "directories",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tempfile",
+ "tokio",
+ "urlencoding",
+ "windows 0.58.0",
+]
+
+[[package]]
 name = "codex-plus-core"
 version = "1.2.34"
 dependencies = [
@@ -473,31 +498,6 @@ dependencies = [
  "directories",
  "serde_json",
  "tokio",
-]
-
-[[package]]
-name = "codex-ultura"
-version = "1.2.10"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64 0.22.1",
- "codex-plus-core",
- "codex-plus-data",
- "codex-plus-launcher",
- "directories",
- "reqwest 0.12.28",
- "rusqlite",
- "serde",
- "serde_json",
- "serde_yaml",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tempfile",
- "tokio",
- "urlencoding",
- "windows 0.58.0",
 ]
 
 [[package]]

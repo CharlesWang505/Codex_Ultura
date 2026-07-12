@@ -11,7 +11,7 @@ export class AppErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('Codex_Ultura UI failed to render.', error, info.componentStack)
+    console.error('Codex Compass UI failed to render.', error, info.componentStack)
   }
 
   render() {

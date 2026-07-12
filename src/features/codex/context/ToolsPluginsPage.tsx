@@ -126,7 +126,7 @@ export function ToolsPluginsPage({
       <ConfirmDialog
         open={Boolean(pendingDelete)}
         title="删除工具或插件配置"
-        description="删除后会从 Codex_Ultura 管理的公共 Codex 配置中移除。"
+      description="删除后会从 Codex Compass 管理的公共 Codex 配置中移除。"
         items={pendingDelete ? [`${CONTEXT_KIND_LABELS[pendingDelete.kind]} · ${pendingDelete.title || pendingDelete.id}`] : []}
         confirmLabel="删除"
         destructive

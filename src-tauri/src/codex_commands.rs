@@ -547,7 +547,7 @@ fn spawn_codex_plus_launch(
             message: if started {
                 accepted_message.to_string()
             } else {
-                "Codex 启动服务已在 Codex_Ultura 内运行。".to_string()
+                "Codex 启动服务已在 Codex Compass 内运行。".to_string()
             },
             payload: json!({
                 "debugPort": debug_port,
@@ -1936,6 +1936,34 @@ pub fn set_user_script_enabled(key: String, enabled: bool) -> CommandResult<Sett
 }
 
 #[tauri::command]
+pub async fn load_user_script_runtime() -> CommandResult<SettingsPayload> {
+    let state = inspect_user_script_runtime(false).await;
+    settings_payload_with_user_scripts(
+        if state.connected {
+            "已读取当前 Codex 的脚本运行状态。"
+        } else {
+            &state.message
+        },
+        state.inventory,
+        !state.connected,
+    )
+}
+
+#[tauri::command]
+pub async fn reload_user_scripts() -> CommandResult<SettingsPayload> {
+    let state = inspect_user_script_runtime(true).await;
+    settings_payload_with_user_scripts(
+        if state.connected {
+            "已将启用的脚本重新加载到当前 Codex。"
+        } else {
+            &state.message
+        },
+        state.inventory,
+        !state.connected,
+    )
+}
+
+#[tauri::command]
 pub fn delete_user_script(key: String) -> CommandResult<SettingsPayload> {
     let trimmed = key.trim();
     if trimmed.is_empty() {
@@ -2192,13 +2220,13 @@ pub async fn perform_update(
 }
 
 const UPDATE_DISABLED_MESSAGE: &str =
-    "Codex_Ultura 暂未配置独立更新源；为避免误装 CodexPlusPlus，自动下载已停用。";
+    "Codex Compass 暂未配置独立更新源；为避免误装 CodexPlusPlus，自动下载已停用。";
 
 fn disabled_update_payload() -> Value {
     json!({
         "currentVersion": env!("CARGO_PKG_VERSION"),
         "latestVersion": Value::Null,
-        "releaseSummary": "请从 Codex_Ultura 的发布目录手动安装新版本。",
+        "releaseSummary": "请从 Codex Compass 的发布目录手动安装新版本。",
         "assetName": Value::Null,
         "assetUrl": Value::Null,
         "updateAvailable": false,
@@ -2220,7 +2248,7 @@ pub fn install_watcher() -> CommandResult<WatcherPayload> {
         Ok(path) => path,
         Err(error) => {
             return failed(
-                &format!("安装 watcher 失败：无法定位 Codex_Ultura 主程序：{error}"),
+                &format!("安装 watcher 失败：无法定位 Codex Compass 主程序：{error}"),
                 watcher_payload(),
             );
         }
@@ -2245,7 +2273,7 @@ pub fn enable_watcher() -> CommandResult<WatcherPayload> {
         Ok(path) => path,
         Err(error) => {
             return failed(
-                &format!("启用 watcher 失败：无法定位 Codex_Ultura 主程序：{error}"),
+                &format!("启用 watcher 失败：无法定位 Codex Compass 主程序：{error}"),
                 watcher_payload(),
             );
         }
@@ -3655,6 +3683,27 @@ fn fallback_settings_payload() -> SettingsPayload {
     }
 }
 
+fn settings_payload_with_user_scripts(
+    message: &str,
+    user_scripts: Value,
+    warning_status: bool,
+) -> CommandResult<SettingsPayload> {
+    match settings_payload_value() {
+        Ok(mut payload) => {
+            payload.user_scripts = user_scripts;
+            if warning_status {
+                warning(message, payload)
+            } else {
+                ok(message, payload)
+            }
+        }
+        Err((error, mut payload)) => {
+            payload.user_scripts = user_scripts;
+            failed(&format!("读取设置失败：{error}"), payload)
+        }
+    }
+}
+
 fn user_script_inventory() -> Value {
     default_user_script_manager()
         .inventory()
@@ -3678,6 +3727,208 @@ fn failed_script_market_payload(message: &str) -> ScriptMarketPayload {
         }),
         user_scripts: user_script_inventory(),
     }
+}
+
+struct UserScriptRuntimeState {
+    inventory: Value,
+    connected: bool,
+    message: String,
+}
+
+async fn inspect_user_script_runtime(reload: bool) -> UserScriptRuntimeState {
+    let manager = default_user_script_manager();
+    let inventory = manager.inventory().unwrap_or_else(|error| {
+        json!({
+            "enabled": true,
+            "scripts": [],
+            "status_message": format!("读取脚本目录失败：{error}")
+        })
+    });
+    let debug_port = StatusStore::default()
+        .load_latest()
+        .ok()
+        .flatten()
+        .and_then(|status| status.debug_port)
+        .unwrap_or(9222);
+    let targets = match codex_plus_core::cdp::list_targets(debug_port).await {
+        Ok(targets) => targets,
+        Err(error) => {
+            let message = format!(
+                "尚未连接到 Codex 调试端口 {debug_port}；请点击左上角闪电按钮启动或重启 Codex。{error}"
+            );
+            return UserScriptRuntimeState {
+                inventory: merge_user_script_runtime(inventory, None, &message),
+                connected: false,
+                message,
+            };
+        }
+    };
+    let target = match codex_plus_core::cdp::pick_injectable_codex_page_target(&targets) {
+        Ok(target) => target,
+        Err(error) => {
+            let message =
+                format!("没有找到可注入的 Codex 页面；请点击左上角闪电按钮重启 Codex。{error}");
+            return UserScriptRuntimeState {
+                inventory: merge_user_script_runtime(inventory, None, &message),
+                connected: false,
+                message,
+            };
+        }
+    };
+    let Some(websocket_url) = target.web_socket_debugger_url.as_deref() else {
+        let message = "Codex 页面没有提供调试连接；请重启 Codex 后重试。".to_string();
+        return UserScriptRuntimeState {
+            inventory: merge_user_script_runtime(inventory, None, &message),
+            connected: false,
+            message,
+        };
+    };
+
+    if reload {
+        match manager.build_enabled_bundle() {
+            Ok(bundle) if !bundle.trim().is_empty() => {
+                if let Err(error) =
+                    codex_plus_core::bridge::evaluate_script(websocket_url, &bundle).await
+                {
+                    let message = format!("脚本重新加载失败：{error}");
+                    return UserScriptRuntimeState {
+                        inventory: merge_user_script_runtime(inventory, None, &message),
+                        connected: false,
+                        message,
+                    };
+                }
+            }
+            Ok(_) => {}
+            Err(error) => {
+                let message = format!("生成脚本包失败：{error}");
+                return UserScriptRuntimeState {
+                    inventory: merge_user_script_runtime(inventory, None, &message),
+                    connected: false,
+                    message,
+                };
+            }
+        }
+    }
+
+    let runtime_result = codex_plus_core::bridge::evaluate_script(
+        websocket_url,
+        r#"JSON.stringify(window.__codexPlusUserScripts?.scripts || {})"#,
+    )
+    .await;
+    let runtime = runtime_result
+        .as_ref()
+        .ok()
+        .and_then(user_script_runtime_value);
+    let message = if runtime.is_some() {
+        "已连接当前 Codex 页面。".to_string()
+    } else {
+        runtime_result
+            .err()
+            .map(|error| format!("读取脚本运行状态失败：{error}"))
+            .unwrap_or_else(|| "当前 Codex 页面尚未建立脚本运行状态。".to_string())
+    };
+    UserScriptRuntimeState {
+        inventory: merge_user_script_runtime(inventory, runtime.as_ref(), &message),
+        connected: runtime.is_some(),
+        message,
+    }
+}
+
+fn user_script_runtime_value(response: &Value) -> Option<Value> {
+    response
+        .pointer("/result/result/value")
+        .and_then(Value::as_str)
+        .and_then(|value| serde_json::from_str(value).ok())
+}
+
+fn merge_user_script_runtime(
+    mut inventory: Value,
+    runtime: Option<&Value>,
+    pending_message: &str,
+) -> Value {
+    let globally_enabled = inventory
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let runtime_scripts = runtime.and_then(Value::as_object);
+    let Some(scripts) = inventory.get_mut("scripts").and_then(Value::as_array_mut) else {
+        return inventory;
+    };
+
+    for script in scripts {
+        let Some(script_object) = script.as_object_mut() else {
+            continue;
+        };
+        let key = script_object
+            .get("key")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let enabled = globally_enabled
+            && script_object
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+        let runtime_script = runtime_scripts.and_then(|items| items.get(key));
+        let runtime_status = runtime_script
+            .and_then(|item| item.get("status"))
+            .and_then(Value::as_str);
+        let runtime_error = runtime_script
+            .and_then(|item| item.get("error"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+
+        if !enabled {
+            let still_running = matches!(runtime_status, Some("loaded" | "loading" | "failed"));
+            script_object.insert(
+                "status".to_string(),
+                json!(if still_running {
+                    "pending_restart"
+                } else {
+                    "disabled"
+                }),
+            );
+            script_object.insert("error".to_string(), json!(""));
+            script_object.insert(
+                "status_message".to_string(),
+                json!(if still_running {
+                    "配置已停用，但脚本仍存在于当前页面；重启 Codex 后完全移除。"
+                } else {
+                    "脚本当前未启用。"
+                }),
+            );
+            continue;
+        }
+
+        match runtime_status {
+            Some("loaded") => {
+                script_object.insert("status".to_string(), json!("loaded"));
+                script_object.insert("error".to_string(), json!(""));
+                script_object.insert(
+                    "status_message".to_string(),
+                    json!("已加载到当前 Codex 页面。"),
+                );
+            }
+            Some("failed") => {
+                script_object.insert("status".to_string(), json!("failed"));
+                script_object.insert("error".to_string(), json!(runtime_error));
+                script_object.insert(
+                    "status_message".to_string(),
+                    json!("脚本执行失败，请展开运行错误查看详情。"),
+                );
+            }
+            Some("loading") => {
+                script_object.insert("status".to_string(), json!("loading"));
+                script_object.insert("error".to_string(), json!(""));
+                script_object.insert("status_message".to_string(), json!("脚本正在加载。"));
+            }
+            _ => {
+                script_object.insert("status".to_string(), json!("pending_restart"));
+                script_object.insert("error".to_string(), json!(""));
+                script_object.insert("status_message".to_string(), json!(pending_message));
+            }
+        }
+    }
+    inventory
 }
 
 fn script_market_payload_from_manifest(
@@ -3849,7 +4100,7 @@ fn watcher_payload() -> WatcherPayload {
         .installed
         .then(|| {
             (!registration.valid)
-                .then_some("Watcher 启动注册与当前 Codex_Ultura 主程序不一致。".to_string())
+                .then_some("Watcher 启动注册与当前 Codex Compass 主程序不一致。".to_string())
         })
         .flatten();
     WatcherPayload {
@@ -3903,6 +4154,14 @@ fn ok<T: Serialize>(message: &str, payload: T) -> CommandResult<T> {
     }
 }
 
+fn warning<T: Serialize>(message: &str, payload: T) -> CommandResult<T> {
+    CommandResult {
+        status: "warning".to_string(),
+        message: message.to_string(),
+        payload,
+    }
+}
+
 fn failed<T: Serialize>(message: &str, payload: T) -> CommandResult<T> {
     CommandResult {
         status: "failed".to_string(),
@@ -3926,6 +4185,45 @@ fn default_log_lines() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_script_runtime_merge_reports_loaded_failed_and_pending_states() {
+        let inventory = json!({
+            "enabled": true,
+            "scripts": [
+                {"key": "user:loaded.js", "enabled": true, "status": "pending_restart", "error": ""},
+                {"key": "user:failed.js", "enabled": true, "status": "pending_restart", "error": ""},
+                {"key": "user:pending.js", "enabled": true, "status": "pending_restart", "error": ""},
+                {"key": "user:disabled.js", "enabled": false, "status": "disabled", "error": ""}
+            ]
+        });
+        let runtime = json!({
+            "user:loaded.js": {"status": "loaded", "error": ""},
+            "user:failed.js": {"status": "failed", "error": "boom"},
+            "user:disabled.js": {"status": "loaded", "error": ""}
+        });
+
+        let merged = merge_user_script_runtime(inventory, Some(&runtime), "等待重启");
+        assert_eq!(merged["scripts"][0]["status"], "loaded");
+        assert_eq!(merged["scripts"][1]["status"], "failed");
+        assert_eq!(merged["scripts"][1]["error"], "boom");
+        assert_eq!(merged["scripts"][2]["status"], "pending_restart");
+        assert_eq!(merged["scripts"][3]["status"], "pending_restart");
+    }
+
+    #[test]
+    fn user_script_runtime_value_reads_cdp_string_result() {
+        let response = json!({
+            "result": {
+                "result": {
+                    "type": "string",
+                    "value": "{\"user:a.js\":{\"status\":\"loaded\"}}"
+                }
+            }
+        });
+        let runtime = user_script_runtime_value(&response).expect("runtime value");
+        assert_eq!(runtime["user:a.js"]["status"], "loaded");
+    }
 
     #[test]
     fn hot_switch_scan_settings_keeps_only_selected_suppliers() {
@@ -4471,7 +4769,7 @@ mod tests {
         let profile = RelayProfile {
             relay_mode: codex_plus_core::settings::RelayMode::PureApi,
             protocol: codex_plus_core::settings::RelayProtocol::Responses,
-            config_contents: "model_provider = \"ai\"\nmodel = \"gpt-image-2\"\n\n[model_providers.ai]\nname = \"ai\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"https://image-relay.example\"\n"
+            config_contents: "model_provider = \"ai\"\nmodel = \"gpt-image-2\"\n\n[model_providers.ai]\nname = \"ai\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"https://ahg.codes\"\n"
                 .to_string(),
             auth_contents: "{}\n".to_string(),
             ..RelayProfile::default()

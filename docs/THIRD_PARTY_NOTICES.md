@@ -2,14 +2,14 @@
 
 ## CodexPlusPlus
 
-Codex_Ultura 的 Codex 管理、配置、会话、插件和兼容层包含并修改了 CodexPlusPlus 的部分代码。
+Codex Compass 的 Codex 管理、配置、会话、插件和兼容层包含并修改了 CodexPlusPlus 的部分代码。
 
 - 项目地址：https://github.com/BigPizzaV3/CodexPlusPlus
 - 原作者：BigPizzaV3
 - 许可证：GNU Affero General Public License v3.0 only（`AGPL-3.0-only`）
 - 上游版权：Copyright (C) 2026 BigPizzaV3
 
-Codex_Ultura 的对应修改源码随本仓库一并提供。CodexPlusPlus 的许可证不授予 OpenAI、ChatGPT、Codex 商标、应用资源或其他第三方内容的权利。
+Codex Compass 的对应修改源码随本仓库一并提供。CodexPlusPlus 的许可证不授予 OpenAI、ChatGPT、Codex 商标、应用资源或其他第三方内容的权利。
 
 ## OpenAI 插件市场
 

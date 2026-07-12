@@ -4,7 +4,8 @@ pub use codex_plus_core::install::{
     EntryPointState, InstallActionResult, InstallOptions, ShortcutState,
 };
 
-const SHORTCUT_NAME: &str = "Codex_Ultura.lnk";
+const SHORTCUT_NAME: &str = "Codex Compass.lnk";
+const LEGACY_SHORTCUT_NAME: &str = "Codex_Ultura.lnk";
 
 fn api_detect_options(mut options: InstallOptions) -> InstallOptions {
     if let Ok(executable) = std::env::current_exe() {
@@ -18,20 +19,20 @@ fn api_detect_options(mut options: InstallOptions) -> InstallOptions {
 
 pub fn install_entrypoints() -> InstallActionResult {
     let options = api_detect_options(InstallOptions::default());
-    action_result(platform_install(&options), "Codex_Ultura 入口已安装。")
+    action_result(platform_install(&options), "Codex Compass 入口已安装。")
 }
 
 pub fn uninstall_entrypoints(options: InstallOptions) -> InstallActionResult {
     let options = api_detect_options(options);
     action_result(
         platform_uninstall(&options),
-        "Codex_Ultura 入口已卸载，应用数据已保留。",
+        "Codex Compass 入口已卸载，应用数据已保留。",
     )
 }
 
 pub fn repair_shortcuts() -> InstallActionResult {
     let options = api_detect_options(InstallOptions::default());
-    action_result(platform_install(&options), "Codex_Ultura 快捷方式已修复。")
+    action_result(platform_install(&options), "Codex Compass 快捷方式已修复。")
 }
 
 pub fn inspect_entrypoints() -> EntryPointState {
@@ -64,6 +65,14 @@ fn action_result(result: Result<(), String>, success_message: &str) -> InstallAc
 }
 
 fn shortcut_path(options: &InstallOptions) -> Option<PathBuf> {
+    shortcut_path_named(options, SHORTCUT_NAME)
+}
+
+fn legacy_shortcut_path(options: &InstallOptions) -> Option<PathBuf> {
+    shortcut_path_named(options, LEGACY_SHORTCUT_NAME)
+}
+
+fn shortcut_path_named(options: &InstallOptions, name: &str) -> Option<PathBuf> {
     options
         .install_root
         .clone()
@@ -72,7 +81,7 @@ fn shortcut_path(options: &InstallOptions) -> Option<PathBuf> {
                 .desktop_dir()
                 .map(Path::to_path_buf)
         })
-        .map(|root| root.join(SHORTCUT_NAME))
+        .map(|root| root.join(name))
 }
 
 #[cfg(windows)]
@@ -98,7 +107,7 @@ fn platform_install(options: &InstallOptions) -> Result<(), String> {
         .as_ref()
         .or(options.launcher_path.as_ref())
         .cloned()
-        .ok_or_else(|| "无法定位 Codex_Ultura 可执行文件".to_string())?;
+        .ok_or_else(|| "无法定位 Codex Compass 可执行文件".to_string())?;
     if let Some(parent) = shortcut.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
@@ -114,15 +123,23 @@ fn platform_install(options: &InstallOptions) -> Result<(), String> {
             if let Some(directory) = target.parent() {
                 shell_link.SetWorkingDirectory(PCWSTR(wide_null(directory).as_ptr()))?;
             }
-            shell_link.SetDescription(PCWSTR(wide_null("Open Codex_Ultura").as_ptr()))?;
+            shell_link.SetDescription(PCWSTR(wide_null("Open Codex Compass").as_ptr()))?;
             shell_link.SetIconLocation(PCWSTR(wide_null(&target).as_ptr()), 0)?;
             let persist_file: IPersistFile = shell_link.cast()?;
             persist_file.Save(PCWSTR(wide_null(&shortcut).as_ptr()), true)?;
             Ok(())
         })();
         CoUninitialize();
-        result.map_err(|error| format!("创建 Codex_Ultura 快捷方式失败：{error}"))
+        result.map_err(|error| format!("创建 Codex Compass 快捷方式失败：{error}"))?;
     }
+    if let Some(legacy) = legacy_shortcut_path(options) {
+        match std::fs::remove_file(legacy) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("清理旧 Codex_Ultura 快捷方式失败：{error}")),
+        }
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -130,11 +147,17 @@ fn platform_uninstall(options: &InstallOptions) -> Result<(), String> {
     let Some(shortcut) = shortcut_path(options) else {
         return Err("无法定位桌面目录".to_string());
     };
-    match std::fs::remove_file(shortcut) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.to_string()),
+    for path in [Some(shortcut), legacy_shortcut_path(options)]
+        .into_iter()
+        .flatten()
+    {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
     }
+    Ok(())
 }
 
 #[cfg(not(windows))]
@@ -169,7 +192,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_shortcut_uses_api_detect_name() {
+    fn unified_shortcut_uses_codex_compass_name() {
         let root = tempfile::tempdir().unwrap();
         let options = InstallOptions {
             install_root: Some(root.path().to_path_buf()),
@@ -178,7 +201,7 @@ mod tests {
 
         assert_eq!(
             shortcut_path(&options),
-            Some(root.path().join("Codex_Ultura.lnk"))
+            Some(root.path().join("Codex Compass.lnk"))
         );
     }
 }

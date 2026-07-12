@@ -275,7 +275,7 @@ impl UserScriptManager {
                 let status = if !config.enabled || !script.enabled {
                     "disabled"
                 } else {
-                    "not_loaded"
+                    "pending_restart"
                 };
                 json!({
                     "key": script.key,
@@ -284,6 +284,11 @@ impl UserScriptManager {
                     "enabled": script.enabled,
                     "status": status,
                     "error": "",
+                    "status_message": if status == "pending_restart" {
+                        "尚未确认已加载到当前 Codex；请重新加载脚本或重启 Codex。"
+                    } else {
+                        "脚本当前未启用。"
+                    },
                     "market_id": market.as_ref().map(|item| item.id.as_str()).unwrap_or(""),
                     "version": market.as_ref().map(|item| item.version.as_str()).unwrap_or(""),
                     "installed": market.is_some(),

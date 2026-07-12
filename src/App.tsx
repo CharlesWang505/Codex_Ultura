@@ -1915,7 +1915,7 @@ function App() {
           >
             <Zap size={18} />
           </button>
-          <strong data-tauri-drag-region>Codex_Ultura</strong>
+          <strong data-tauri-drag-region>Codex Compass · 法典指南针</strong>
           {brandRestartState !== 'idle' ? <span className={`brand-restart-status ${brandRestartState}`}>{brandRestartState === 'busy' ? '正在重启 Codex…' : brandRestartState === 'ok' ? '已请求重启' : '重启失败'}</span> : null}
         </div>
         <div className="window-drag-region" data-tauri-drag-region onDoubleClick={() => runWindowAction('toggleMaximize')} />
@@ -2900,18 +2900,19 @@ function App() {
           )}
 
           {showSettings && (
-            <Panel className="about-panel" icon={<Info size={18} />} title="关于 Codex_Ultura">
+            <Panel className="about-panel" icon={<Info size={18} />} title="关于 Codex Compass">
               <div className="about-body">
                 <div className="about-product">
                   <div className="about-product-mark"><Zap size={22} /></div>
                   <div>
-                    <strong>Codex_Ultura</strong>
+                    <strong>Codex Compass</strong>
+                    <span>法典指南针</span>
                     <span>版本 v{appVersion}</span>
                   </div>
                 </div>
                 <p>统一管理中转站账户监控、Codex 供应商配置与 8787 热切换。</p>
                 <div className="about-capabilities">
-                  <span>Codex_Ultura 主题界面</span>
+                  <span>Codex Compass 主题界面</span>
                   <span>Codex 兼容核心</span>
                   <span>本地优先存储</span>
                 </div>

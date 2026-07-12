@@ -47,15 +47,15 @@ fn watcher_enable_and_disable_toggle_flag() {
 
 #[test]
 fn watcher_install_plan_registers_rust_launcher_at_logon() {
-    let plan = build_watcher_install_plan("C:/Tools/Codex_Ultura.exe".into(), 9333);
+    let plan = build_watcher_install_plan("C:/Tools/Codex Compass.exe".into(), 9333);
 
     assert_eq!(plan.run_value_name, "CodexPlusWatcher");
     assert_eq!(
         plan.run_value,
-        "\"C:/Tools/Codex_Ultura.exe\" --watcher --hidden --debug-port 9333"
+        "\"C:/Tools/Codex Compass.exe\" --watcher --hidden --debug-port 9333"
     );
     assert_eq!(plan.shortcut_name, "CodexPlusWatcher.lnk");
-    assert_eq!(plan.shortcut_target, "C:/Tools/Codex_Ultura.exe");
+    assert_eq!(plan.shortcut_target, "C:/Tools/Codex Compass.exe");
     assert_eq!(
         plan.shortcut_arguments,
         "--watcher --hidden --debug-port 9333"
@@ -64,9 +64,9 @@ fn watcher_install_plan_registers_rust_launcher_at_logon() {
 
 #[test]
 fn spawn_launcher_command_points_to_api_detect_hidden_watcher_mode() {
-    let command = build_spawn_launcher_command("C:/Tools/Codex_Ultura.exe", 9444);
+    let command = build_spawn_launcher_command("C:/Tools/Codex Compass.exe", 9444);
 
-    assert_eq!(command[0], "C:/Tools/Codex_Ultura.exe");
+    assert_eq!(command[0], "C:/Tools/Codex Compass.exe");
     assert!(command.contains(&"--watcher".to_string()));
     assert!(command.contains(&"--hidden".to_string()));
     assert!(command.contains(&"--debug-port".to_string()));

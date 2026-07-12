@@ -81,21 +81,20 @@ export function ScriptMarketPage({ settingsResult, onSettingsResultChange }: Pro
     try {
       const result = await callCodex<ScriptMarketResult>('refresh_script_market')
       setMarket(result)
-      syncInventory(result.userScripts)
       if (!silent || result.status === 'failed') setNotice({ tone: noticeTone(result.status), text: result.message })
     } catch (error) {
       setNotice({ tone: 'error', text: error instanceof Error ? error.message : String(error) })
     } finally {
       endBusy('market')
     }
-  }, [beginBusy, endBusy, syncInventory])
+  }, [beginBusy, endBusy])
 
-  const refreshLocal = useCallback(async () => {
+  const refreshRuntime = useCallback(async (reload = false, silent = false) => {
     beginBusy('local')
     try {
-      const result = await callCodex<SettingsResult>('load_settings')
+      const result = await callCodex<SettingsResult>(reload ? 'reload_user_scripts' : 'load_user_script_runtime')
       onSettingsResultChange(result)
-      setNotice({ tone: noticeTone(result.status), text: result.message })
+      if (!silent || result.status === 'failed') setNotice({ tone: noticeTone(result.status), text: result.message })
     } catch (error) {
       setNotice({ tone: 'error', text: error instanceof Error ? error.message : String(error) })
     } finally {
@@ -104,6 +103,7 @@ export function ScriptMarketPage({ settingsResult, onSettingsResultChange }: Pro
   }, [beginBusy, endBusy, onSettingsResultChange])
 
   useEffect(() => { void refreshMarket(true) }, [refreshMarket])
+  useEffect(() => { void refreshRuntime(false, true) }, [refreshRuntime])
 
   useEffect(() => {
     if (!deleteState) return
@@ -120,22 +120,34 @@ export function ScriptMarketPage({ settingsResult, onSettingsResultChange }: Pro
     try {
       const result = await callCodex<ScriptMarketResult>('install_market_script', { id })
       setMarket(result)
-      syncInventory(result.userScripts)
-      setNotice({ tone: noticeTone(result.status), text: result.message })
+      if (result.status === 'failed') {
+        syncInventory(result.userScripts)
+        setNotice({ tone: 'error', text: result.message })
+      } else {
+        const runtime = await callCodex<SettingsResult>('reload_user_scripts')
+        onSettingsResultChange(runtime)
+        setNotice({ tone: noticeTone(runtime.status), text: `${result.message}${runtime.message}` })
+      }
     } catch (error) {
       setNotice({ tone: 'error', text: error instanceof Error ? error.message : String(error) })
     } finally {
       endBusy(operationKey)
     }
-  }, [beginBusy, endBusy, syncInventory])
+  }, [beginBusy, endBusy, onSettingsResultChange, syncInventory])
 
   const toggleScript = useCallback(async (script: InstalledScript) => {
     const operationKey = `toggle-${script.key}`
     beginBusy(operationKey)
     try {
       const result = await callCodex<SettingsResult>('set_user_script_enabled', { key: script.key, enabled: !script.enabled })
-      onSettingsResultChange(result)
-      setNotice({ tone: noticeTone(result.status), text: result.message })
+      if (result.status === 'failed') {
+        onSettingsResultChange(result)
+        setNotice({ tone: 'error', text: result.message })
+      } else {
+        const runtime = await callCodex<SettingsResult>(script.enabled ? 'load_user_script_runtime' : 'reload_user_scripts')
+        onSettingsResultChange(runtime)
+        setNotice({ tone: noticeTone(runtime.status), text: `${result.message}${runtime.message}` })
+      }
     } catch (error) {
       setNotice({ tone: 'error', text: error instanceof Error ? error.message : String(error) })
     } finally {
@@ -183,7 +195,7 @@ export function ScriptMarketPage({ settingsResult, onSettingsResultChange }: Pro
         </div>
         <div className="script-toolbar">
           <button type="button" className="primary" disabled={operationBusy} onClick={() => void refreshMarket()}>{busyKeys.has('market') ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}刷新市场</button>
-          <button type="button" disabled={operationBusy} onClick={() => void refreshLocal()}>{busyKeys.has('local') ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}刷新本地</button>
+          <button type="button" disabled={operationBusy} onClick={() => void refreshRuntime(true)}>{busyKeys.has('local') ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}重新加载脚本</button>
           <button type="button" onClick={() => void openExternal(SCRIPT_MARKET_REPOSITORY_URL)}><ExternalLink size={14} />市场主页</button>
         </div>
       </section>

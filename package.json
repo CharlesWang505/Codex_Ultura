@@ -1,9 +1,9 @@
 {
-  "name": "codex-ultura",
+  "name": "codex-compass",
   "private": true,
-  "version": "1.2.10",
-  "description": "Codex_Ultura: API relay monitor, Codex manager, and hot-switch desktop gateway.",
-  "author": "Codex_Ultura",
+  "version": "1.3.0",
+  "description": "Codex Compass (法典指南针): API relay monitor, Codex manager, and hot-switch desktop gateway.",
+  "author": "Codex Compass",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {

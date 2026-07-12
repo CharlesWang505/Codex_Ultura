@@ -329,6 +329,8 @@ pub fn run() {
             codex_plus_manager_lib::commands::refresh_script_market,
             codex_plus_manager_lib::commands::install_market_script,
             codex_plus_manager_lib::commands::set_user_script_enabled,
+            codex_plus_manager_lib::commands::load_user_script_runtime,
+            codex_plus_manager_lib::commands::reload_user_scripts,
             codex_plus_manager_lib::commands::delete_user_script,
             codex_plus_manager_lib::commands::open_external_url,
             codex_plus_manager_lib::commands::install_entrypoints,
@@ -461,11 +463,11 @@ mod watcher_startup_tests {
     #[test]
     fn hidden_watcher_mode_requires_both_flags() {
         assert!(watcher_hidden_from_args([
-            "codex-ultura",
+            "codex-compass",
             "--watcher",
             "--hidden"
         ]));
-        assert!(!watcher_hidden_from_args(["codex-ultura", "--watcher"]));
-        assert!(!watcher_hidden_from_args(["codex-ultura", "--hidden"]));
+        assert!(!watcher_hidden_from_args(["codex-compass", "--watcher"]));
+        assert!(!watcher_hidden_from_args(["codex-compass", "--hidden"]));
     }
 }

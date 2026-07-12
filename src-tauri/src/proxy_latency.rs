@@ -876,7 +876,7 @@ async fn install_managed_mihomo(app: &AppHandle) -> Result<String, String> {
     let client = Client::builder()
         .timeout(Duration::from_secs(120))
         .redirect(Policy::limited(10))
-        .user_agent("Codex_Ultura/0.5 managed-mihomo-installer")
+        .user_agent("Codex-Compass/1.3 managed-mihomo-installer")
         .build()
         .map_err(|_| "无法创建内置测试引擎下载客户端".to_string())?;
     let latest = client
@@ -1083,11 +1083,11 @@ fn write_managed_mihomo_config(
         unified_delay: true,
         proxy_providers: providers,
         proxy_groups: vec![ManagedProxyGroupConfig {
-            name: "Codex_Ultura".to_string(),
+            name: "Codex Compass".to_string(),
             group_type: "select".to_string(),
             providers: provider_names,
         }],
-        rules: vec!["MATCH,Codex_Ultura".to_string()],
+        rules: vec!["MATCH,Codex Compass".to_string()],
     };
     let yaml = serde_yaml::to_string(&managed_config)
         .map_err(|_| "无法生成 Mihomo 隔离配置".to_string())?;
@@ -1823,7 +1823,7 @@ pub async fn test_direct_delay(
         .connect_timeout(Duration::from_millis(timeout_ms))
         .timeout(Duration::from_millis(timeout_ms))
         .redirect(Policy::limited(5))
-        .user_agent("Codex_Ultura/0.5")
+        .user_agent("Codex-Compass/1.3")
         .build()
         .map_err(|_| "无法创建本地直连测速客户端".to_string())?;
     let started = Instant::now();

@@ -243,6 +243,7 @@ export type UserScriptInventory = {
     enabled: boolean
     status: string
     error: string
+    statusMessage?: string
     marketId?: string
     version?: string
     installed?: boolean

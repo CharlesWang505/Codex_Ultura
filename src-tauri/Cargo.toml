@@ -37,10 +37,10 @@ uuid = { version = "1", features = ["v4"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [package]
-name = "codex-ultura"
-version = "1.2.10"
-description = "Codex_Ultura: API relay monitor, Codex manager, and hot-switch desktop gateway."
-authors = ["Codex_Ultura"]
+name = "codex-compass"
+version = "1.3.0"
+description = "Codex Compass (法典指南针): API relay monitor, Codex manager, and hot-switch desktop gateway."
+authors = ["Codex Compass"]
 license = "AGPL-3.0-only"
 edition = "2024"
 rust-version = "1.85"
@@ -48,7 +48,7 @@ rust-version = "1.85"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
-name = "codex_ultura_lib"
+name = "codex_compass_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

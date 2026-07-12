@@ -16,6 +16,16 @@ function sourceLabel(script: InstalledScript) {
   return script.source || '未知来源'
 }
 
+function statusLabel(status: string) {
+  if (status === 'loaded') return '已加载'
+  if (status === 'failed') return '加载失败'
+  if (status === 'loading') return '正在加载'
+  if (status === 'pending_restart') return '等待应用'
+  if (status === 'disabled') return '已停用'
+  if (status === 'not_loaded') return '尚未加载'
+  return status || '状态未知'
+}
+
 export function InstalledScriptRow({ script, busy, disabled, onToggle, onDelete }: Props) {
   const canDelete = script.source === 'user'
   return (
@@ -26,8 +36,8 @@ export function InstalledScriptRow({ script, busy, disabled, onToggle, onDelete 
         {script.homepage ? <small>{script.homepage}</small> : null}
       </div>
       <div className="installed-script-status">
-        <strong>{script.status || '状态未知'}</strong>
-        {script.error ? <details><summary><CircleAlert size={13} />运行错误</summary><code>{script.error}</code></details> : <span>未报告运行错误</span>}
+        <strong>{statusLabel(script.status)}</strong>
+        {script.error ? <details><summary><CircleAlert size={13} />运行错误</summary><code>{script.error}</code></details> : <span>{script.statusMessage || '尚未读取当前 Codex 的运行状态'}</span>}
       </div>
       <div className="installed-script-actions">
         <button type="button" disabled={disabled} onClick={() => onToggle(script)}>{busy ? <LoaderCircle className="spin" size={14} /> : script.enabled ? <PowerOff size={14} /> : <Power size={14} />}{script.enabled ? '停用' : '启用'}</button>

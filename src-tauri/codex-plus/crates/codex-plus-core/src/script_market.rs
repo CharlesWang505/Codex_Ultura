@@ -64,7 +64,7 @@ pub fn parse_market_manifest(raw: Value) -> anyhow::Result<ScriptMarketManifest>
 pub async fn fetch_market_manifest(url: &str) -> anyhow::Result<ScriptMarketManifest> {
     let url = validate_market_url(url, "script market index")?;
     let response =
-        crate::http_client::proxied_client(&format!("Codex_Ultura/{}", crate::version::VERSION))?
+        crate::http_client::proxied_client(&format!("Codex-Compass/{}", crate::version::VERSION))?
             .get(url)
             .send()
             .await
@@ -86,7 +86,7 @@ pub async fn fetch_market_manifest(url: &str) -> anyhow::Result<ScriptMarketMani
 pub async fn download_script(url: &str) -> anyhow::Result<Vec<u8>> {
     let url = validate_market_url(url, "market script")?;
     let response =
-        crate::http_client::proxied_client(&format!("Codex_Ultura/{}", crate::version::VERSION))?
+        crate::http_client::proxied_client(&format!("Codex-Compass/{}", crate::version::VERSION))?
             .get(url)
             .send()
             .await
