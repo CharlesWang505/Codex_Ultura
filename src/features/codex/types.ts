@@ -122,6 +122,7 @@ export type BackendSettings = {
   hotSwitchRelayId: string
   hotSwitchModel: string
   hotSwitchModelRoutingEnabled: boolean
+  hotSwitchAutoModelEnabled: boolean
   hotSwitchModelMappings: HotSwitchModelMapping[]
   relayTestModel: string
   floatingSwitchEnabled?: boolean

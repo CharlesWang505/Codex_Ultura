@@ -401,6 +401,30 @@ fn hot_switch_model_routing_writes_catalog_and_preserves_existing_context() {
 }
 
 #[test]
+fn hot_switch_fixed_target_removes_generated_catalog_and_updates_model() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("config.toml"),
+        "model = \"codex-compass-auto\"\nmodel_catalog_json = \"model-catalogs/hot-switch.json\"\n",
+    )
+    .unwrap();
+
+    apply_hot_switch_config_to_home(
+        temp.path(),
+        "http://127.0.0.1:8787/v1",
+        "codex-plus-hot-switch",
+        &[],
+        Some("real-model"),
+    )
+    .unwrap();
+
+    let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+    assert!(config.contains(r#"model = "real-model""#));
+    assert!(!config.contains("model_catalog_json"));
+    assert!(!config.contains("codex-compass-auto"));
+}
+
+#[test]
 fn apply_chat_protocol_relay_points_codex_to_local_responses_proxy() {
     let temp = tempfile::tempdir().unwrap();
 
@@ -2605,6 +2629,80 @@ command = "managed-command"
     assert!(config.contains("[marketplaces.role-specific-plugins]"));
     assert!(config.contains(r#"source_type = "local""#));
     assert!(config.contains("role-specific-plugins"));
+}
+
+#[test]
+fn apply_relay_profile_to_home_with_switch_rules_preserves_live_codex_preferences() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("config.toml"),
+        r#"model = "old-model"
+model_provider = "old-provider"
+model_reasoning_effort = "xhigh"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[model_providers.old-provider]
+name = "old-provider"
+base_url = "https://old.example/v1"
+wire_api = "responses"
+requires_openai_auth = true
+
+[desktop]
+followUpQueueMode = "queue"
+enabled-reasoning-efforts = ["low", "medium", "high", "xhigh", "ultra", "max"]
+ambient-suggestions-enabled = false
+
+[windows]
+sandbox = "elevated"
+
+[projects.'D:\work']
+trust_level = "trusted"
+"#,
+    )
+    .unwrap();
+    let profile = RelayProfile {
+        id: "relay-a".to_string(),
+        relay_mode: RelayMode::PureApi,
+        config_contents: r#"model = "gpt-5.5"
+model_provider = "custom"
+model_reasoning_effort = "low"
+approval_policy = "never"
+sandbox_mode = "read-only"
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "https://relay.example/v1"
+
+[desktop]
+ambient-suggestions-enabled = true
+
+[windows]
+sandbox = "restricted"
+"#
+        .to_string(),
+        auth_contents: r#"{"OPENAI_API_KEY":"sk-new"}"#.to_string(),
+        ..RelayProfile::default()
+    };
+
+    apply_relay_profile_to_home_with_switch_rules(temp.path(), &profile, "").unwrap();
+
+    let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+    assert!(config.contains(r#"model = "gpt-5.5""#));
+    assert!(config.contains(r#"model_provider = "custom""#));
+    assert!(config.contains(r#"model_reasoning_effort = "xhigh""#));
+    assert!(config.contains(r#"approval_policy = "on-request""#));
+    assert!(config.contains(r#"sandbox_mode = "workspace-write""#));
+    assert!(config.contains(r#"ambient-suggestions-enabled = false"#));
+    assert!(config.contains(
+        r#"enabled-reasoning-efforts = ["low", "medium", "high", "xhigh", "ultra", "max"]"#
+    ));
+    assert!(config.contains(r#"sandbox = "elevated""#));
+    assert!(config.contains("[projects.'D:\\work']"));
+    assert!(!config.contains("old-provider"));
+    assert!(!config.contains(r#"approval_policy = "never""#));
 }
 
 #[test]

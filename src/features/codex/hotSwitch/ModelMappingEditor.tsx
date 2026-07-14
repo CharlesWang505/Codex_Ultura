@@ -1,4 +1,4 @@
-import { Plus, RefreshCw, Save, Trash2 } from 'lucide-react'
+import { Plus, RefreshCw, Save, Sparkles, Trash2 } from 'lucide-react'
 import type { HotSwitchMappingResult, HotSwitchModelMapping, RelayProfile } from '../types'
 import { CodexEmptyState, CodexField, CodexPanel, LoadingButton } from '../shared/CodexPanel'
 import { FallbackRelayPicker } from './FallbackRelayPicker'
@@ -11,18 +11,22 @@ export function ModelMappingEditor({
   scan,
   validation,
   busy,
+  autoModelEnabled,
   onChange,
   onScan,
   onSave,
+  onSetAutoModelEnabled,
 }: {
   profiles: RelayProfile[]
   mappings: HotSwitchModelMapping[]
   scan: HotSwitchMappingResult | null
   validation: MappingValidation
   busy: string
+  autoModelEnabled: boolean
   onChange: (mappings: HotSwitchModelMapping[]) => void
   onScan: () => void
   onSave: () => void
+  onSetAutoModelEnabled: (enabled: boolean) => void
 }) {
   const usableProfiles = profiles.filter((profile) => profile.relayMode !== 'aggregate')
   const operationBusy = Boolean(busy)
@@ -45,6 +49,9 @@ export function ModelMappingEditor({
       icon={<RefreshCw size={18} />}
       action={(
         <div className="codex-inline-actions">
+          <LoadingButton busy={busy === 'auto-model'} className={autoModelEnabled ? '' : 'primary'} disabled={operationBusy || !usableProfiles.length || !validation.valid} onClick={() => onSetAutoModelEnabled(!autoModelEnabled)}>
+            <Sparkles size={14} />{autoModelEnabled ? '移除自动模型' : '添加自动模型'}
+          </LoadingButton>
           <button type="button" disabled={operationBusy || !usableProfiles.length} onClick={add}><Plus size={14} />新增规则</button>
           <LoadingButton busy={busy === 'scan-mappings'} disabled={operationBusy || !usableProfiles.length} onClick={onScan}><RefreshCw size={14} />自动扫描</LoadingButton>
           <LoadingButton busy={busy === 'save-mappings'} disabled={operationBusy || !validation.valid} onClick={onSave}><Save size={14} />保存规则</LoadingButton>
@@ -57,6 +64,12 @@ export function ModelMappingEditor({
           <div className="codex-scan-summary"><span>{scan.mappings.length} 条映射</span><span>{scan.conflictCount} 个同名冲突</span><span>{scan.failedProviderCount} 个扫描失败</span></div>
           <ProviderScanResults providers={scan.providers} />
         </>
+      ) : null}
+      {autoModelEnabled ? (
+        <div className="codex-auto-model-note">
+          <Sparkles size={16} />
+          <div><strong>Codex Compass 自动模型已添加</strong><span>在 Codex 中选择“Codex Compass 自动模型”，之后悬浮面板选择的供应商、模型和 Reasoning 会在下一次请求立即生效。</span></div>
+        </div>
       ) : null}
       {!validation.valid ? <div className="codex-mapping-errors">{validation.messages.slice(0, 8).map((message) => <span key={message}>{message}</span>)}</div> : null}
       {mappings.length ? (

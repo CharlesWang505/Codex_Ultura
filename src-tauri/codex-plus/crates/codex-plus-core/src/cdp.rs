@@ -98,11 +98,19 @@ pub fn is_injectable_page_target(target: &CdpTarget) -> bool {
 }
 
 pub fn is_codex_page_target(target: &CdpTarget) -> bool {
-    if target.target_type != "page" {
+    if target.target_type != "page" || is_codex_compass_page(&target.title, &target.url) {
         return false;
     }
     let haystack = format!("{} {}", target.title, target.url).to_lowercase();
     haystack.contains("codex") || is_chatgpt_desktop_page(&target.title, &target.url)
+}
+
+fn is_codex_compass_page(title: &str, url: &str) -> bool {
+    let title = title.trim().to_lowercase();
+    let url = url.trim().to_lowercase();
+    title.contains("codex compass")
+        || title.contains("法典指南针")
+        || url.contains("chat.ai-api.relay-meter")
 }
 
 fn is_chatgpt_desktop_page(title: &str, url: &str) -> bool {

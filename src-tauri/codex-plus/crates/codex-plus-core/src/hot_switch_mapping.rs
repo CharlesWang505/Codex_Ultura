@@ -7,6 +7,9 @@ use serde_json::{Value, json};
 use crate::model_suffix::ModelCatalogEntry;
 use crate::settings::{BackendSettings, HotSwitchModelMapping, RelayMode, RelayProfile};
 
+pub const HOT_SWITCH_AUTO_MODEL_ID: &str = "codex-compass-auto";
+pub const HOT_SWITCH_AUTO_MODEL_DISPLAY_NAME: &str = "Codex Compass 自动模型";
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HotSwitchProviderScan {
@@ -190,6 +193,26 @@ pub fn resolve_hot_switch_route(
         return Ok(None);
     }
     let requested_model = requested_model.trim().to_string();
+    if settings.hot_switch_auto_model_enabled && requested_model == HOT_SWITCH_AUTO_MODEL_ID {
+        let mut relay = settings.hot_switch_relay_profile();
+        let upstream_model = if !settings.hot_switch_model.trim().is_empty() {
+            settings.hot_switch_model.trim().to_string()
+        } else {
+            relay.model.trim().to_string()
+        };
+        if upstream_model.is_empty() {
+            anyhow::bail!("Codex Compass 自动模型尚未选择实际模型");
+        }
+        relay.model = upstream_model.clone();
+        return Ok(Some(HotSwitchResolvedRoute {
+            relay,
+            fallback_relays: Vec::new(),
+            requested_model,
+            upstream_model,
+            reasoning: settings.default_reasoning.clone(),
+            mapped: true,
+        }));
+    }
     if settings.hot_switch_model_routing_enabled && !requested_model.is_empty() {
         if let Some(mapping) = settings
             .hot_switch_model_mappings
@@ -252,30 +275,43 @@ pub fn resolve_hot_switch_route(
 }
 
 pub fn hot_switch_catalog_entries(settings: &BackendSettings) -> Vec<ModelCatalogEntry> {
-    if !settings.hot_switch_model_routing_enabled {
-        return Vec::new();
-    }
     let provider_names = settings
         .relay_profiles
         .iter()
         .map(|profile| (profile.id.as_str(), profile.name.as_str()))
         .collect::<HashMap<_, _>>();
-    settings
-        .hot_switch_model_mappings
-        .iter()
-        .map(|mapping| ModelCatalogEntry {
-            slug: mapping.model.clone(),
-            display_name: provider_names
-                .get(mapping.relay_id.as_str())
-                .filter(|name| !name.trim().is_empty())
-                .map(|name| format!("{} · {}", mapping.model, name))
-                .unwrap_or_else(|| mapping.model.clone()),
-            suffix_window: mapping_context_window(settings, mapping),
-        })
-        .collect()
+    let mut entries = Vec::new();
+    if settings.hot_switch_auto_model_enabled {
+        entries.push(ModelCatalogEntry {
+            slug: HOT_SWITCH_AUTO_MODEL_ID.to_string(),
+            display_name: HOT_SWITCH_AUTO_MODEL_DISPLAY_NAME.to_string(),
+            suffix_window: None,
+        });
+    }
+    if settings.hot_switch_model_routing_enabled {
+        entries.extend(
+            settings
+                .hot_switch_model_mappings
+                .iter()
+                .filter(|mapping| mapping.model != HOT_SWITCH_AUTO_MODEL_ID)
+                .map(|mapping| ModelCatalogEntry {
+                    slug: mapping.model.clone(),
+                    display_name: provider_names
+                        .get(mapping.relay_id.as_str())
+                        .filter(|name| !name.trim().is_empty())
+                        .map(|name| format!("{} · {}", mapping.model, name))
+                        .unwrap_or_else(|| mapping.model.clone()),
+                    suffix_window: mapping_context_window(settings, mapping),
+                }),
+        );
+    }
+    entries
 }
 
 pub fn hot_switch_default_model(settings: &BackendSettings) -> Option<String> {
+    if settings.hot_switch_auto_model_enabled {
+        return Some(HOT_SWITCH_AUTO_MODEL_ID.to_string());
+    }
     let matching = settings.hot_switch_model_mappings.iter().find(|mapping| {
         mapping.relay_id == settings.hot_switch_relay_id
             && mapping.upstream_model == settings.hot_switch_model
@@ -283,40 +319,51 @@ pub fn hot_switch_default_model(settings: &BackendSettings) -> Option<String> {
     matching
         .or_else(|| settings.hot_switch_model_mappings.first())
         .map(|mapping| mapping.model.clone())
+        .or_else(|| {
+            (!settings.hot_switch_model.trim().is_empty())
+                .then(|| settings.hot_switch_model.trim().to_string())
+        })
 }
 
 pub fn hot_switch_models_api_payload(
     settings: &BackendSettings,
     codex_catalog_format: bool,
 ) -> Option<Value> {
-    if !settings.hot_switch_enabled
-        || !settings.hot_switch_model_routing_enabled
-        || settings.hot_switch_model_mappings.is_empty()
-    {
+    let entries = hot_switch_catalog_entries(settings);
+    if !settings.hot_switch_enabled || entries.is_empty() {
         return None;
     }
     if codex_catalog_format {
-        let entries = hot_switch_catalog_entries(settings);
         return serde_json::from_str(&crate::model_suffix::build_model_catalog_json(
             &entries, None,
         ))
         .ok();
     }
-    let data = settings
-        .hot_switch_model_mappings
+    let data = entries
         .iter()
-        .map(|mapping| {
-            let owner = settings
-                .relay_profiles
-                .iter()
-                .find(|profile| profile.id == mapping.relay_id)
-                .map(|profile| profile.name.as_str())
-                .unwrap_or(mapping.relay_id.as_str());
+        .map(|entry| {
+            let owner = if entry.slug == HOT_SWITCH_AUTO_MODEL_ID {
+                "Codex Compass"
+            } else {
+                settings
+                    .hot_switch_model_mappings
+                    .iter()
+                    .find(|mapping| mapping.model == entry.slug)
+                    .and_then(|mapping| {
+                        settings
+                            .relay_profiles
+                            .iter()
+                            .find(|profile| profile.id == mapping.relay_id)
+                            .map(|profile| profile.name.as_str())
+                            .or(Some(mapping.relay_id.as_str()))
+                    })
+                    .unwrap_or("Codex Compass")
+            };
             json!({
-                "id": mapping.model,
+                "id": entry.slug,
                 "object": "model",
                 "owned_by": owner,
-                "display_name": format!("{} · {}", mapping.model, owner)
+                "display_name": entry.display_name
             })
         })
         .collect::<Vec<_>>();
@@ -510,6 +557,65 @@ mod tests {
         assert_eq!(route.fallback_relays[0].id, "a");
         assert_eq!(route.upstream_model, "real-model");
         assert_eq!(route.reasoning, "high");
+    }
+
+    #[test]
+    fn resolver_auto_model_uses_current_floating_target() {
+        let mut settings = BackendSettings {
+            hot_switch_enabled: true,
+            hot_switch_auto_model_enabled: true,
+            hot_switch_relay_id: "b".to_string(),
+            hot_switch_model: "model-from-floating".to_string(),
+            default_reasoning: "xhigh".to_string(),
+            relay_profiles: vec![profile("a", "A"), profile("b", "B")],
+            ..BackendSettings::default()
+        };
+
+        let route = resolve_hot_switch_route(&settings, HOT_SWITCH_AUTO_MODEL_ID)
+            .unwrap()
+            .unwrap();
+        assert!(route.mapped);
+        assert_eq!(route.relay.id, "b");
+        assert_eq!(route.upstream_model, "model-from-floating");
+        assert_eq!(route.reasoning, "xhigh");
+
+        settings.hot_switch_relay_id = "a".to_string();
+        settings.hot_switch_model = "next-model".to_string();
+        let next_route = resolve_hot_switch_route(&settings, HOT_SWITCH_AUTO_MODEL_ID)
+            .unwrap()
+            .unwrap();
+        assert_eq!(next_route.relay.id, "a");
+        assert_eq!(next_route.upstream_model, "next-model");
+    }
+
+    #[test]
+    fn auto_model_is_exposed_without_regular_mappings_and_becomes_default() {
+        let settings = BackendSettings {
+            hot_switch_enabled: true,
+            hot_switch_auto_model_enabled: true,
+            relay_profiles: vec![profile("a", "Provider A")],
+            ..BackendSettings::default()
+        };
+
+        assert_eq!(
+            hot_switch_default_model(&settings).as_deref(),
+            Some(HOT_SWITCH_AUTO_MODEL_ID)
+        );
+
+        let payload = hot_switch_models_api_payload(&settings, false).unwrap();
+        assert_eq!(payload["data"][0]["id"], HOT_SWITCH_AUTO_MODEL_ID);
+        assert_eq!(payload["data"][0]["owned_by"], "Codex Compass");
+        assert_eq!(
+            payload["data"][0]["display_name"],
+            HOT_SWITCH_AUTO_MODEL_DISPLAY_NAME
+        );
+
+        let catalog = hot_switch_models_api_payload(&settings, true).unwrap();
+        assert_eq!(catalog["models"][0]["slug"], HOT_SWITCH_AUTO_MODEL_ID);
+        assert_eq!(
+            catalog["models"][0]["display_name"],
+            HOT_SWITCH_AUTO_MODEL_DISPLAY_NAME
+        );
     }
 
     #[test]

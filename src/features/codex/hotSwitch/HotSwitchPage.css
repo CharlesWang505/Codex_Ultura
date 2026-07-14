@@ -63,6 +63,23 @@
   font-size: 12px;
 }
 
+.codex-auto-model-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border-soft));
+  border-radius: 9px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-panel-soft));
+}
+
+.codex-auto-model-note > svg { flex: 0 0 auto; margin-top: 2px; color: var(--accent-strong); }
+.codex-auto-model-note > div { display: grid; gap: 3px; }
+.codex-auto-model-note strong { color: var(--text-strong); }
+.codex-auto-model-note span { font-size: 12px; line-height: 1.55; }
+
 .codex-provider-scan-results {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

@@ -532,6 +532,79 @@ export function CodexWorkspace({ section }: Props) {
     }
   }, [acceptSettings, mappings, run, settings])
 
+  const setAutoModelEnabled = useCallback(async (enabled: boolean) => {
+    if (!settings) return
+    if (enabled && !settings.hotSwitchModel.trim()) {
+      setNotice({ tone: 'warning', text: '请先在页面顶部选择回退模型，作为自动模型当前使用的实际模型。' })
+      return
+    }
+
+    const result = await run('auto-model', async () => {
+      const saved = await callCodex<HotSwitchMappingResult>('save_hot_switch_model_mappings', {
+        request: {
+          enabled: settings.hotSwitchModelRoutingEnabled || enabled,
+          autoModelEnabled: enabled,
+          mappings,
+        },
+      })
+      if (!commandSucceeded(saved)) return { saved, hot: null, restart: null }
+
+      let hot: HotSwitchResult | null = null
+      if (enabled) {
+        await callCodex<boolean>('floating_set_enabled', { enabled: true })
+        hot = await callCodex<HotSwitchResult>('set_hot_switch', {
+          request: {
+            enabled: true,
+            relayId: saved.settings.hotSwitchRelayId,
+            model: saved.settings.hotSwitchModel,
+          },
+        })
+        if (!commandSucceeded(hot)) return { saved, hot, restart: null }
+      }
+
+      const effectiveSettings = hot?.settings ?? saved.settings
+      const restart = await callCodex<CommandResult<{ debugPort: number; helperPort: number }>>('restart_codex_plus', {
+        request: {
+          appPath: effectiveSettings.codexAppPath ?? '',
+          debugPort: 9222,
+          helperPort: 58321,
+        },
+      })
+      return { saved, hot, restart }
+    })
+    if (!result) return
+
+    setMappingScan(result.saved)
+    setMappings(result.saved.mappings)
+    if (result.hot) {
+      setHotSwitch(result.hot)
+      acceptSettings(result.hot)
+    } else {
+      acceptSettings(result.saved)
+    }
+    if (!commandSucceeded(result.saved)) {
+      setNotice(noticeFrom(result.saved))
+      return
+    }
+    if (result.hot && !commandSucceeded(result.hot)) {
+      setNotice(noticeFrom(result.hot))
+      return
+    }
+    if (!result.restart || result.restart.status === 'failed') {
+      setNotice({
+        tone: 'warning',
+        text: `${enabled ? '自动模型已添加' : '自动模型已移除'}，但 Codex 自动重启失败。请点击左上角闪电按钮重新打开 Codex。`,
+      })
+      return
+    }
+    setNotice({
+      tone: 'ok',
+      text: enabled
+        ? '已添加 Codex Compass 自动模型、开启悬浮球和 8787，并重新打开 Codex。选择自动模型后可直接用悬浮面板切换实际模型。'
+        : '已移除 Codex Compass 自动模型并重新打开 Codex。',
+    })
+  }, [acceptSettings, mappings, run, settings])
+
   const upsertContext = useCallback(async (draft: ContextDraft, operationKey = 'save-context') => {
     if (!settings || !draft.id.trim() || !draft.tomlBody.trim()) return false
     const result = await run(operationKey, () => callCodex<ContextEntriesResult>('upsert_context_entry', {
@@ -816,6 +889,7 @@ export function CodexWorkspace({ section }: Props) {
           onScan={() => void scanMappings()}
           onInject={(relayIds) => void injectProviderModels(relayIds)}
           onSaveMappings={() => void saveMappings()}
+          onSetAutoModelEnabled={(enabled) => void setAutoModelEnabled(enabled)}
           onSaveSettings={() => void saveSettings(settings)}
           onSetFloatingEnabled={(enabled) => void setFloatingEnabled(enabled)}
           onResetFloatingPosition={() => void resetFloatingPosition()}

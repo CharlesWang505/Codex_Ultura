@@ -1144,6 +1144,26 @@ fn pick_injectable_codex_page_target_accepts_chatgpt_desktop_error_page() {
 }
 
 #[test]
+fn pick_injectable_codex_page_target_rejects_codex_compass_window() {
+    let targets = vec![target(
+        "compass",
+        "page",
+        "Codex Compass · 法典指南针",
+        "app://-/index.html",
+        Some("ws://compass"),
+    )];
+
+    let error = pick_injectable_codex_page_target(&targets)
+        .expect_err("Codex Compass must never receive Codex user scripts");
+
+    assert!(
+        error
+            .to_string()
+            .contains("No injectable Codex page target found")
+    );
+}
+
+#[test]
 fn pick_injectable_codex_page_target_requires_websocket() {
     let targets = vec![target("codex", "page", "Codex", "https://codex.test", None)];
 

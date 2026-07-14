@@ -2,7 +2,7 @@
 
 ## 仓库内容
 
-将本目录中的文件上传到 GitHub 仓库。不要把同级的 `Codex-Compass-Release-1.3.1` 目录提交到源码仓库。
+将本目录中的文件上传到 GitHub 仓库。不要把同级的 `Codex-Compass-Release-1.3.2` 目录提交到源码仓库。
 
 推荐仓库设置：
 
@@ -13,11 +13,11 @@
 
 ## Release 资产
 
-在 GitHub Releases 创建 `v1.3.1`，从同级 `Codex-Compass-Release-1.3.1` 上传：
+在 GitHub Releases 创建 `v1.3.2`，从同级 `Codex-Compass-Release-1.3.2` 上传：
 
-- `Codex_Compass_1.3.1_x64-portable.exe`
-- `Codex_Compass_1.3.1_x64-setup.exe`
-- `Codex_Compass_1.3.1_source.zip`
+- `Codex_Compass_1.3.2_x64-portable.exe`
+- `Codex_Compass_1.3.2_x64-setup.exe`
+- `Codex_Compass_1.3.2_source.zip`
 - `SHA256SUMS.txt`
 
 ## 不得上传

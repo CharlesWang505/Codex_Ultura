@@ -352,6 +352,8 @@ pub struct BackendSettings {
     pub hot_switch_model: String,
     #[serde(rename = "hotSwitchModelRoutingEnabled", default)]
     pub hot_switch_model_routing_enabled: bool,
+    #[serde(rename = "hotSwitchAutoModelEnabled", default)]
+    pub hot_switch_auto_model_enabled: bool,
     #[serde(rename = "hotSwitchModelMappings", default)]
     pub hot_switch_model_mappings: Vec<HotSwitchModelMapping>,
     #[serde(rename = "aggregateRelayProfiles", default)]
@@ -422,6 +424,7 @@ impl Default for BackendSettings {
             hot_switch_relay_id: default_active_relay_id(),
             hot_switch_model: String::new(),
             hot_switch_model_routing_enabled: false,
+            hot_switch_auto_model_enabled: false,
             hot_switch_model_mappings: Vec::new(),
             aggregate_relay_profiles: Vec::new(),
             active_aggregate_relay_id: String::new(),
@@ -1368,7 +1371,7 @@ fn normalize_hot_switch_model_mappings(settings: &mut BackendSettings) {
         normalized.push(mapping);
     }
     settings.hot_switch_model_mappings = normalized;
-    if settings.hot_switch_model_mappings.is_empty() {
+    if settings.hot_switch_model_mappings.is_empty() && !settings.hot_switch_auto_model_enabled {
         settings.hot_switch_model_routing_enabled = false;
     }
 }
@@ -1492,6 +1495,7 @@ mod tests {
         assert_eq!(settings.relay_profiles[0].relay_mode, RelayMode::Official);
         assert!(settings.relay_common_config_contents.is_empty());
         assert_eq!(settings.relay_test_model, default_relay_test_model());
+        assert!(!settings.hot_switch_auto_model_enabled);
         assert!(!settings.codex_app_stepwise_enabled);
         assert!(!settings.codex_app_stepwise_direct_send);
         assert!(settings.codex_app_stepwise_base_url.is_empty());
@@ -1505,6 +1509,20 @@ mod tests {
         assert_eq!(settings.codex_app_stepwise_max_input_chars, 6000);
         assert_eq!(settings.codex_app_stepwise_max_output_tokens, 500);
         assert_eq!(settings.codex_app_stepwise_timeout_ms, 8000);
+    }
+
+    #[test]
+    fn auto_model_keeps_model_routing_enabled_without_regular_mappings() {
+        let settings = normalize_settings_config_sections(BackendSettings {
+            hot_switch_model_routing_enabled: true,
+            hot_switch_auto_model_enabled: true,
+            hot_switch_model_mappings: Vec::new(),
+            ..BackendSettings::default()
+        });
+
+        assert!(settings.hot_switch_model_routing_enabled);
+        assert!(settings.hot_switch_auto_model_enabled);
+        assert!(settings.hot_switch_model_mappings.is_empty());
     }
 
     #[test]

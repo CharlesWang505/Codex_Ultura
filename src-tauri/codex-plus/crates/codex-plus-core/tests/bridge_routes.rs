@@ -618,6 +618,8 @@ async fn core_runtime_reload_evaluates_enabled_user_bundle_and_status_is_ok() {
     assert_eq!(evaluated.len(), 1);
     assert!(evaluated[0].starts_with("ws://page:"));
     assert!(evaluated[0].contains("window.demo = true;"));
+    assert!(evaluated[0].contains("previous.fingerprint === fingerprint"));
+    assert!(evaluated[0].contains("typeof previous.cleanup === \"function\""));
 }
 
 #[tokio::test]

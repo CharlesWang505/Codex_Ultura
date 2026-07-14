@@ -1,5 +1,6 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, hash_map::DefaultHasher};
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -426,12 +427,27 @@ struct UserScriptFile {
 }
 
 fn wrap_script(script: &UserScriptFile, source: &str) -> String {
+    let fingerprint = script_fingerprint(&script.key, source);
     format!(
         r#"
 (() => {{
   window.__codexPlusUserScripts = window.__codexPlusUserScripts || {{ scripts: {{}} }};
   const key = {key};
-  window.__codexPlusUserScripts.scripts[key] = {{ key, name: {name}, source: {source_name}, status: "loading", error: "", loadedAt: new Date().toISOString() }};
+  const fingerprint = {fingerprint};
+  const previous = window.__codexPlusUserScripts.scripts[key];
+  if (previous && previous.fingerprint === fingerprint && previous.status === "loaded") {{
+    previous.lastCheckedAt = new Date().toISOString();
+    return;
+  }}
+  let cleanupError = "";
+  if (previous && typeof previous.cleanup === "function") {{
+    try {{
+      previous.cleanup();
+    }} catch (error) {{
+      cleanupError = String(error && (error.stack || error.message) || error);
+    }}
+  }}
+  window.__codexPlusUserScripts.scripts[key] = {{ key, name: {name}, source: {source_name}, fingerprint, status: "loading", error: "", cleanupError, loadedAt: new Date().toISOString() }};
   try {{
 {source}
     window.__codexPlusUserScripts.scripts[key].status = "loaded";
@@ -445,8 +461,16 @@ fn wrap_script(script: &UserScriptFile, source: &str) -> String {
         key = json!(script.key).to_string(),
         name = json!(script.name).to_string(),
         source_name = json!(script.source).to_string(),
+        fingerprint = json!(fingerprint).to_string(),
         source = source
     )
+}
+
+fn script_fingerprint(key: &str, source: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    key.hash(&mut hasher);
+    source.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 fn config_from_object(raw: &Map<String, Value>) -> UserScriptConfig {

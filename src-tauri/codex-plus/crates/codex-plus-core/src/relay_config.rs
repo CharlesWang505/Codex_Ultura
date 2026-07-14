@@ -11,6 +11,14 @@ use crate::settings::{RelayContextSelection, RelayProfile, RelayProtocol};
 const RELAY_PROVIDER: &str = "custom";
 const LEGACY_RELAY_PROVIDERS: &[&str] = &["CodexPlusPlus", "CodexPP"];
 const CHAT_UPSTREAM_BASE_URL_KEY: &str = "codex_plus_chat_base_url";
+const RELAY_MANAGED_ROOT_KEYS: &[&str] = &[
+    "model",
+    "model_provider",
+    "model_catalog_json",
+    "base_url",
+    CHAT_UPSTREAM_BASE_URL_KEY,
+];
+const RELAY_MANAGED_CONTEXT_TABLES: &[&str] = &["mcp_servers", "skills", "plugins"];
 const RESERVED_MODEL_PROVIDER_IDS: &[&str] = &[
     "amazon-bedrock",
     "openai",
@@ -336,12 +344,12 @@ pub fn apply_hot_switch_config_to_home(
         let catalog_json = crate::model_suffix::build_model_catalog_json(catalog_entries, None);
         crate::settings::atomic_write(&catalog_path, catalog_json.as_bytes())?;
         doc["model_catalog_json"] = toml_edit::value(HOT_SWITCH_CATALOG);
-        if let Some(model) = default_model
-            .map(str::trim)
-            .filter(|model| !model.is_empty())
-        {
-            doc["model"] = toml_edit::value(model);
-        }
+    }
+    if let Some(model) = default_model
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+    {
+        doc["model"] = toml_edit::value(model);
     }
     updated = normalize_optional_toml(doc);
     let auth_contents = serde_json::to_string_pretty(&json!({
@@ -444,7 +452,9 @@ pub fn apply_relay_profile_files_to_home_with_context(
         String::new()
     };
     let profile_config = complete_relay_profile_config(profile)?;
-    let config_with_common = merge_common_config_into_config(&profile_config, &selected_common)?;
+    let config_with_live_preferences = preserve_live_user_preferences(home, &profile_config)?;
+    let config_with_common =
+        merge_common_config_into_config(&config_with_live_preferences, &selected_common)?;
     let config_with_common =
         preserve_unmanaged_live_context_entries(home, &config_with_common, common_config_contents)?;
     let config_with_limits = apply_context_limits_to_config(
@@ -481,7 +491,9 @@ pub fn apply_relay_profile_to_home_with_switch_rules_and_computer_use_guard(
         String::new()
     };
     let profile_config = complete_relay_profile_config(profile)?;
-    let config_with_common = merge_common_config_into_config(&profile_config, &selected_common)?;
+    let config_with_live_preferences = preserve_live_user_preferences(home, &profile_config)?;
+    let config_with_common =
+        merge_common_config_into_config(&config_with_live_preferences, &selected_common)?;
     let config_with_common =
         preserve_unmanaged_live_context_entries(home, &config_with_common, common_config_contents)?;
     let config_with_limits = apply_context_limits_to_config(
@@ -520,7 +532,9 @@ pub fn apply_relay_profile_config_to_home_with_context(
         String::new()
     };
     let profile_config = complete_relay_profile_config(profile)?;
-    let config_with_common = merge_common_config_into_config(&profile_config, &selected_common)?;
+    let config_with_live_preferences = preserve_live_user_preferences(home, &profile_config)?;
+    let config_with_common =
+        merge_common_config_into_config(&config_with_live_preferences, &selected_common)?;
     let config_with_limits = apply_context_limits_to_config(
         &config_with_common,
         &profile.context_window,
@@ -1000,6 +1014,26 @@ fn preserve_unmanaged_live_context_entries(
         live_doc.as_table(),
         managed_doc.as_table(),
     );
+    Ok(normalize_optional_toml(target_doc))
+}
+
+fn preserve_live_user_preferences(home: &Path, config_text: &str) -> anyhow::Result<String> {
+    let live_config = read_optional_text(&home.join("config.toml"))?;
+    if live_config.trim().is_empty() {
+        return Ok(ensure_trailing_newline(config_text.to_string()));
+    }
+
+    let mut target_doc = parse_toml_document(config_text)?;
+    let live_doc = parse_toml_document(&live_config)?;
+    for (key, item) in live_doc.as_table().iter() {
+        if RELAY_MANAGED_ROOT_KEYS.contains(&key)
+            || key == "model_providers"
+            || RELAY_MANAGED_CONTEXT_TABLES.contains(&key)
+        {
+            continue;
+        }
+        target_doc.as_table_mut().insert(key, item.clone());
+    }
     Ok(normalize_optional_toml(target_doc))
 }
 

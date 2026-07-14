@@ -1,5 +1,7 @@
 import type { HotSwitchModelMapping, RelayProfile } from '../types'
 
+const AUTO_MODEL_ID = 'codex-compass-auto'
+
 export type MappingValidation = {
   valid: boolean
   messages: string[]
@@ -19,6 +21,7 @@ export function validateMappings(mappings: HotSwitchModelMapping[], profiles: Re
     const alias = mapping.model.trim()
     const upstream = mapping.upstreamModel.trim()
     if (!alias) addError(index, 'Codex 模型别名不能为空。')
+    if (alias === AUTO_MODEL_ID) addError(index, `“${AUTO_MODEL_ID}”是自动模型保留名称。`)
     if (!upstream) addError(index, '上游模型不能为空。')
     if (!mapping.relayId || !providerIds.has(mapping.relayId)) addError(index, '首选供应商不存在或已失效。')
 

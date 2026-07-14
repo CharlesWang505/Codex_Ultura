@@ -80,6 +80,9 @@ body:has(.floating-panel-shell),
 .floating-panel-shell select:focus { border-color: var(--accent-border); box-shadow: var(--focus-ring); }
 .floating-panel-shell input:disabled,
 .floating-panel-shell select:disabled { cursor: not-allowed; opacity: .62; }
+.floating-model-picker { display: grid; grid-template-columns: minmax(0, 1fr) 122px; gap: 8px; }
+.floating-model-picker > input,
+.floating-model-picker > select { min-width: 0; }
 .floating-routing-hint { padding: 8px 10px; border: 1px solid var(--accent-border); border-radius: 8px; color: var(--text-muted); background: var(--accent-bg); font-size: 11px; line-height: 1.45; }
 .floating-actions { gap: 8px; }
 .floating-actions button { flex: 1; justify-content: center; gap: 6px; }

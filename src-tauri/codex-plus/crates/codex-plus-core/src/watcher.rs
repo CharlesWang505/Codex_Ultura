@@ -13,6 +13,7 @@ pub const WATCHER_INTERVAL_SECONDS: f64 = 3.0;
 pub const CDP_PROBE_TIMEOUT_SECONDS: f64 = 0.5;
 pub const TAKEOVER_FAILURE_BACKOFF_SECONDS: f64 = 30.0;
 pub const RESTART_STOP_WAIT_TIMEOUT_MS: u64 = 5_000;
+const RESTART_GRACEFUL_CLOSE_WAIT_MS: u64 = 2_500;
 const RESTART_STOP_WAIT_INTERVAL_MS: u64 = 100;
 pub const WATCHER_RUN_NAME: &str = "CodexPlusWatcher";
 pub const WATCHER_RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -501,8 +502,29 @@ pub fn stop_codex_processes() {}
 
 #[cfg(windows)]
 pub fn stop_codex_processes_and_wait() {
+    let process_ids = find_codex_processes();
+    if process_ids.is_empty() {
+        return;
+    }
+    let graceful_requested = process_ids
+        .iter()
+        .filter(|process_id| crate::windows_integration::request_process_window_close(**process_id))
+        .count();
+    let remaining = wait_for_processes_exit(
+        &process_ids,
+        RESTART_GRACEFUL_CLOSE_WAIT_MS,
+        RESTART_STOP_WAIT_INTERVAL_MS,
+    );
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "watcher.graceful_codex_close",
+        serde_json::json!({
+            "process_count": process_ids.len(),
+            "window_close_requested": graceful_requested,
+            "remaining_process_ids": remaining
+        }),
+    );
     terminate_and_wait_for_exit(
-        find_codex_processes(),
+        remaining,
         RESTART_STOP_WAIT_TIMEOUT_MS,
         RESTART_STOP_WAIT_INTERVAL_MS,
     );
@@ -519,23 +541,28 @@ fn terminate_and_wait_for_exit(process_ids: Vec<u32>, timeout_ms: u64, interval_
     for process_id in &process_ids {
         let _ = crate::windows_integration::terminate_process(*process_id);
     }
+    let remaining = wait_for_processes_exit(&process_ids, timeout_ms, interval_ms);
+    if !remaining.is_empty() {
+        let _ = crate::diagnostic_log::append_diagnostic_log(
+            "watcher.stop_wait_timeout",
+            serde_json::json!({
+                "remaining_process_ids": remaining,
+                "timeout_ms": timeout_ms
+            }),
+        );
+    }
+}
+
+#[cfg(windows)]
+fn wait_for_processes_exit(process_ids: &[u32], timeout_ms: u64, interval_ms: u64) -> Vec<u32> {
     let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
     loop {
         let running_process_ids = crate::windows_integration::enumerate_processes()
             .into_iter()
             .map(|process| process.process_id);
-        let remaining = process_ids_still_running(&process_ids, running_process_ids);
+        let remaining = process_ids_still_running(process_ids, running_process_ids);
         if remaining.is_empty() || std::time::Instant::now() >= deadline {
-            if !remaining.is_empty() {
-                let _ = crate::diagnostic_log::append_diagnostic_log(
-                    "watcher.stop_wait_timeout",
-                    serde_json::json!({
-                        "remaining_process_ids": remaining,
-                        "timeout_ms": timeout_ms
-                    }),
-                );
-            }
-            break;
+            return remaining;
         }
         std::thread::sleep(Duration::from_millis(interval_ms));
     }

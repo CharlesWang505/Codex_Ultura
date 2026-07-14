@@ -90,17 +90,18 @@ export function ScriptMarketPage({ settingsResult, onSettingsResultChange }: Pro
   }, [beginBusy, endBusy])
 
   const refreshRuntime = useCallback(async (reload = false, silent = false) => {
-    beginBusy('local')
+    const busyKey = reload ? 'local-reload' : 'runtime-inspect'
+    beginBusy(busyKey)
     try {
       const result = await callCodex<SettingsResult>(reload ? 'reload_user_scripts' : 'load_user_script_runtime')
-      onSettingsResultChange(result)
+      onSettingsResultChangeRef.current(result)
       if (!silent || result.status === 'failed') setNotice({ tone: noticeTone(result.status), text: result.message })
     } catch (error) {
       setNotice({ tone: 'error', text: error instanceof Error ? error.message : String(error) })
     } finally {
-      endBusy('local')
+      endBusy(busyKey)
     }
-  }, [beginBusy, endBusy, onSettingsResultChange])
+  }, [beginBusy, endBusy])
 
   useEffect(() => { void refreshMarket(true) }, [refreshMarket])
   useEffect(() => { void refreshRuntime(false, true) }, [refreshRuntime])
@@ -195,7 +196,7 @@ export function ScriptMarketPage({ settingsResult, onSettingsResultChange }: Pro
         </div>
         <div className="script-toolbar">
           <button type="button" className="primary" disabled={operationBusy} onClick={() => void refreshMarket()}>{busyKeys.has('market') ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}刷新市场</button>
-          <button type="button" disabled={operationBusy} onClick={() => void refreshRuntime(true)}>{busyKeys.has('local') ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}重新加载脚本</button>
+          <button type="button" disabled={operationBusy} onClick={() => void refreshRuntime(true)}>{busyKeys.has('local-reload') ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}重新加载脚本</button>
           <button type="button" onClick={() => void openExternal(SCRIPT_MARKET_REPOSITORY_URL)}><ExternalLink size={14} />市场主页</button>
         </div>
       </section>

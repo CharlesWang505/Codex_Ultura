@@ -36,6 +36,19 @@ test('mapping validation rejects duplicate aliases and invalid fallback chains',
   assert.ok(result.messages.some((message) => message.includes('首选供应商不存在')))
 })
 
+test('mapping validation reserves the Codex Compass auto model alias', () => {
+  const result = validateMappings([{
+    model: 'codex-compass-auto',
+    upstreamModel: 'real-model',
+    relayId: 'relay-a',
+    candidateRelayIds: ['relay-a'],
+    fallbackRelayIds: [],
+  }], profiles)
+
+  assert.equal(result.valid, false)
+  assert.ok(result.messages.some((message) => message.includes('自动模型保留名称')))
+})
+
 test('context toggle replaces root flags without changing nested table flags', () => {
   const source = 'enabled = false\ndisabled = true\ncommand = "node"\n\n[environment]\ndisabled = true\n'
   const enabled = setContextEnabled(source, true)

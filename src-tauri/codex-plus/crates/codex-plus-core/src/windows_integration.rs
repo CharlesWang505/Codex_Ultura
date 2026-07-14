@@ -50,7 +50,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
-    HICON, ICON_BIG, ICON_SMALL, SendMessageW, WM_SETICON,
+    HICON, ICON_BIG, ICON_SMALL, PostMessageW, SendMessageW, WM_CLOSE, WM_SETICON,
 };
 #[cfg(windows)]
 use windows::core::{Interface, PCWSTR, PROPVARIANT, PWSTR};
@@ -359,6 +359,14 @@ pub fn terminate_process(process_id: u32) -> bool {
     }
     let _guard = HandleGuard(handle);
     unsafe { TerminateProcess(handle, 0) }.is_ok()
+}
+
+#[cfg(windows)]
+pub fn request_process_window_close(process_id: u32) -> bool {
+    let Some(hwnd) = visible_window_for_process(process_id) else {
+        return false;
+    };
+    unsafe { PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0)) }.is_ok()
 }
 
 #[cfg(windows)]

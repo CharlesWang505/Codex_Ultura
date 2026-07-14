@@ -417,6 +417,8 @@ pub struct HotSwitchMappingPayload {
 pub struct HotSwitchMappingsRequest {
     pub enabled: bool,
     #[serde(default)]
+    pub auto_model_enabled: Option<bool>,
+    #[serde(default)]
     pub mappings: Vec<HotSwitchModelMapping>,
 }
 
@@ -973,8 +975,12 @@ pub async fn save_hot_switch_model_mappings(
     let current = store.load().unwrap_or_default();
     let mut next = current.clone();
     next.hot_switch_model_mappings = request.mappings;
-    next.hot_switch_model_routing_enabled =
-        request.enabled && !next.hot_switch_model_mappings.is_empty();
+    if let Some(enabled) = request.auto_model_enabled {
+        next.hot_switch_auto_model_enabled = enabled;
+    }
+    next.hot_switch_model_routing_enabled = (request.enabled
+        && !next.hot_switch_model_mappings.is_empty())
+        || next.hot_switch_auto_model_enabled;
     next = normalize_settings_before_save(next);
     if let Err(error) = store.save(&next) {
         return Ok(failed(
