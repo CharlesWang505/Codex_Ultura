@@ -750,36 +750,141 @@ pub fn load_settings() -> CommandResult<SettingsPayload> {
 }
 
 #[tauri::command]
-pub fn save_settings(settings: BackendSettings) -> CommandResult<SettingsPayload> {
-    let mut settings = normalize_settings_before_save(settings);
+pub async fn save_settings(
+    runtime: tauri::State<'_, HotSwitchRuntime>,
+    settings: BackendSettings,
+) -> Result<CommandResult<SettingsPayload>, String> {
+    Ok(save_settings_inner(&runtime, settings).await)
+}
+
+async fn save_settings_inner(
+    runtime: &HotSwitchRuntime,
+    settings: BackendSettings,
+) -> CommandResult<SettingsPayload> {
+    let _operation = runtime.operation.lock().await;
     let store = SettingsStore::default();
     let current = store.load().unwrap_or_default();
-    preserve_detected_codex_app_path(&current, &mut settings);
-    if current.hot_switch_enabled && provider_configuration_changed(&current, &settings) {
+    let (next, provider_changed) = match prepare_settings_for_save(&current, settings) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            return failed(
+                &format!("无法保存并重载 8787 网关：{error}"),
+                settings_payload_for(current),
+            );
+        }
+    };
+
+    if let Err(error) = store.save(&next) {
         return failed(
-            "热切换网关已开启，供应商配置已锁定。请先在“热切换”页面关闭网关。",
-            SettingsPayload {
-                settings: current,
-                settings_path: codex_plus_core::paths::default_settings_path()
-                    .to_string_lossy()
-                    .to_string(),
-                user_scripts: user_script_inventory(),
-            },
+            &format!("保存设置失败：{error}"),
+            settings_payload_for(current),
         );
     }
-    match store.save(&settings) {
-        Ok(()) => settings_payload("设置已保存。", "设置保存后重新读取失败"),
-        Err(error) => failed(
-            &format!("保存设置失败：{error}"),
-            SettingsPayload {
-                settings: current,
-                settings_path: codex_plus_core::paths::default_settings_path()
-                    .to_string_lossy()
-                    .to_string(),
-                user_scripts: user_script_inventory(),
+    let saved = match store.load() {
+        Ok(saved) => saved,
+        Err(error) => {
+            let rollback_error = store.save(&current).err();
+            return failed(
+                &hot_switch_reload_failure_message(
+                    "重新读取已保存设置失败",
+                    &error,
+                    rollback_error.as_ref(),
+                    None,
+                ),
+                settings_payload_for(current),
+            );
+        }
+    };
+
+    if current.hot_switch_enabled {
+        if let Err(error) = runtime.start_for_saved_settings().await {
+            let rollback_error = store.save(&current).err();
+            return failed(
+                &hot_switch_reload_failure_message(
+                    "确认 8787 网关运行状态失败",
+                    &error,
+                    rollback_error.as_ref(),
+                    None,
+                ),
+                settings_payload_for(current),
+            );
+        }
+        if let Err(error) = apply_hot_switch_codex_config(&saved) {
+            let rollback_error = store.save(&current).err();
+            let codex_rollback_error = apply_hot_switch_codex_config(&current).err();
+            return failed(
+                &hot_switch_reload_failure_message(
+                    "刷新 Codex 热切换模型目录失败",
+                    &error,
+                    rollback_error.as_ref(),
+                    codex_rollback_error.as_ref(),
+                ),
+                settings_payload_for(current),
+            );
+        }
+        return settings_payload(
+            if provider_changed {
+                "供应商配置已保存，8787 网关已重载；新请求立即使用新配置，正在执行的请求继续使用旧配置。"
+            } else {
+                "设置已保存，8787 网关已重载；新请求立即使用新配置。"
             },
-        ),
+            "设置保存后重新读取失败",
+        );
     }
+
+    settings_payload("设置已保存。", "设置保存后重新读取失败")
+}
+
+fn prepare_settings_for_save(
+    current: &BackendSettings,
+    settings: BackendSettings,
+) -> anyhow::Result<(BackendSettings, bool)> {
+    let mut next = normalize_settings_before_save(settings);
+    preserve_detected_codex_app_path(current, &mut next);
+
+    // 热切换生命周期只允许由 set_hot_switch 修改，避免普通设置保存
+    // 在不启动或停止服务器的情况下意外改变开启状态。
+    next.hot_switch_enabled = current.hot_switch_enabled;
+    let provider_changed = provider_configuration_changed(current, &next);
+
+    if current.hot_switch_enabled {
+        let (profile, model) = validate_hot_switch_target(&next)?;
+        next.hot_switch_relay_id = profile.id;
+        next.hot_switch_model = model;
+    }
+
+    Ok((next, provider_changed))
+}
+
+fn settings_payload_for(settings: BackendSettings) -> SettingsPayload {
+    SettingsPayload {
+        settings,
+        settings_path: codex_plus_core::paths::default_settings_path()
+            .to_string_lossy()
+            .to_string(),
+        user_scripts: user_script_inventory(),
+    }
+}
+
+fn hot_switch_reload_failure_message(
+    action: &str,
+    error: &anyhow::Error,
+    settings_rollback_error: Option<&anyhow::Error>,
+    codex_rollback_error: Option<&anyhow::Error>,
+) -> String {
+    let rollback_succeeded = settings_rollback_error.is_none() && codex_rollback_error.is_none();
+    let mut message = if rollback_succeeded {
+        format!("{action}：{error}。已恢复保存前的配置")
+    } else {
+        format!("{action}：{error}。配置回滚未完全成功")
+    };
+    if let Some(rollback_error) = settings_rollback_error {
+        message.push_str(&format!("；设置回滚失败：{rollback_error}"));
+    }
+    if let Some(rollback_error) = codex_rollback_error {
+        message.push_str(&format!("；Codex 配置回滚失败：{rollback_error}"));
+    }
+    message
 }
 
 fn preserve_detected_codex_app_path(current: &BackendSettings, next: &mut BackendSettings) {
@@ -876,7 +981,7 @@ async fn set_hot_switch_inner(
         let message = if current.hot_switch_enabled {
             "热切换目标已更新，下一个请求立即生效。"
         } else {
-            "8787 热切换网关已开启，供应商配置已锁定。"
+            "8787 热切换网关已开启；供应商仍可编辑，保存后新请求立即使用新配置。"
         };
         return ok(message, payload);
     }
@@ -5611,12 +5716,113 @@ model_reasoning_effort = "high"
     }
 
     #[test]
-    fn relay_profile_edits_are_locked_separately_from_hot_switch_target() {
+    fn relay_profile_edits_are_detected_for_hot_reload() {
         let current = BackendSettings::default();
         let mut next = current.clone();
         next.relay_profiles[0].name = "已修改供应商".to_string();
 
         assert!(provider_configuration_changed(&current, &next));
+    }
+
+    #[test]
+    fn prepare_settings_allows_provider_edits_while_hot_switch_is_enabled() {
+        let profile = RelayProfile {
+            id: "relay-a".to_string(),
+            name: "供应商 A".to_string(),
+            base_url: "https://relay-a.example/v1".to_string(),
+            upstream_base_url: "https://relay-a.example/v1".to_string(),
+            api_key: "sk-a".to_string(),
+            relay_mode: codex_plus_core::settings::RelayMode::PureApi,
+            model: "model-a".to_string(),
+            model_list: "model-a".to_string(),
+            ..RelayProfile::default()
+        };
+        let current = BackendSettings {
+            relay_profiles: vec![profile],
+            active_relay_id: "relay-a".to_string(),
+            hot_switch_enabled: true,
+            hot_switch_relay_id: "relay-a".to_string(),
+            hot_switch_model: "model-a".to_string(),
+            ..BackendSettings::default()
+        };
+        let mut edited = current.clone();
+        edited.relay_profiles[0].name = "供应商 A（新）".to_string();
+        edited.relay_profiles[0].base_url = "https://relay-a-new.example/v1".to_string();
+        edited.relay_profiles[0].upstream_base_url = "https://relay-a-new.example/v1".to_string();
+
+        let (prepared, provider_changed) =
+            prepare_settings_for_save(&current, edited).expect("provider edit should be accepted");
+
+        assert!(provider_changed);
+        assert!(prepared.hot_switch_enabled);
+        assert_eq!(prepared.hot_switch_relay_id, "relay-a");
+        assert_eq!(
+            prepared.relay_profiles[0].base_url,
+            "https://relay-a-new.example/v1"
+        );
+    }
+
+    #[test]
+    fn prepare_settings_rejects_invalid_active_hot_switch_provider() {
+        let profile = RelayProfile {
+            id: "relay-a".to_string(),
+            name: "供应商 A".to_string(),
+            base_url: "https://relay-a.example/v1".to_string(),
+            upstream_base_url: "https://relay-a.example/v1".to_string(),
+            api_key: "sk-a".to_string(),
+            relay_mode: codex_plus_core::settings::RelayMode::PureApi,
+            model: "model-a".to_string(),
+            ..RelayProfile::default()
+        };
+        let current = BackendSettings {
+            relay_profiles: vec![profile],
+            active_relay_id: "relay-a".to_string(),
+            hot_switch_enabled: true,
+            hot_switch_relay_id: "relay-a".to_string(),
+            hot_switch_model: "model-a".to_string(),
+            ..BackendSettings::default()
+        };
+        let mut invalid = current.clone();
+        invalid.relay_profiles[0].api_key.clear();
+
+        let error = prepare_settings_for_save(&current, invalid)
+            .expect_err("missing API key must reject a live reload");
+
+        assert!(error.to_string().contains("缺少 API Key"));
+        assert_eq!(current.relay_profiles[0].api_key, "sk-a");
+    }
+
+    #[test]
+    fn prepare_settings_selects_a_valid_target_after_removing_current_provider() {
+        let profile = |id: &str, model: &str| RelayProfile {
+            id: id.to_string(),
+            name: id.to_string(),
+            base_url: format!("https://{id}.example/v1"),
+            upstream_base_url: format!("https://{id}.example/v1"),
+            api_key: format!("sk-{id}"),
+            relay_mode: codex_plus_core::settings::RelayMode::PureApi,
+            model: model.to_string(),
+            model_list: model.to_string(),
+            ..RelayProfile::default()
+        };
+        let current = BackendSettings {
+            relay_profiles: vec![profile("relay-a", "model-a"), profile("relay-b", "model-b")],
+            active_relay_id: "relay-a".to_string(),
+            hot_switch_enabled: true,
+            hot_switch_relay_id: "relay-a".to_string(),
+            hot_switch_model: String::new(),
+            ..BackendSettings::default()
+        };
+        let mut edited = current.clone();
+        edited.relay_profiles.remove(0);
+        edited.active_relay_id = "relay-b".to_string();
+
+        let (prepared, provider_changed) = prepare_settings_for_save(&current, edited)
+            .expect("remaining provider should become the hot-switch target");
+
+        assert!(provider_changed);
+        assert_eq!(prepared.hot_switch_relay_id, "relay-b");
+        assert_eq!(prepared.hot_switch_model, "model-b");
     }
 
     #[test]

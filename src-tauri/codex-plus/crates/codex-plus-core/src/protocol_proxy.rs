@@ -520,6 +520,15 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
     original_user_agent: Option<&str>,
 ) -> anyhow::Result<UpstreamProxyResponse> {
     let mut request_json: Value = serde_json::from_str(body)?;
+    let sanitized_history_ids = sanitize_responses_history_item_ids(&mut request_json);
+    if sanitized_history_ids > 0 {
+        let _ = crate::diagnostic_log::append_diagnostic_log(
+            "protocol_proxy.sanitized_history_item_ids",
+            json!({
+                "count": sanitized_history_ids
+            }),
+        );
+    }
     let requested_model = request_model(&request_json);
     let hot_switch_route =
         crate::hot_switch_mapping::resolve_hot_switch_route(&settings, &requested_model)?;
@@ -840,6 +849,50 @@ fn set_request_model(body: &mut Value, model: &str) {
         return;
     };
     object.insert("model".to_string(), Value::String(model.trim().to_string()));
+}
+
+fn sanitize_responses_history_item_ids(body: &mut Value) -> usize {
+    let Some(items) = body.get_mut("input").and_then(Value::as_array_mut) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for item in items {
+        let Some(record) = item.as_object_mut() else {
+            continue;
+        };
+        let expected_prefix = match record.get("type").and_then(Value::as_str) {
+            Some("message") => Some("msg_"),
+            Some("reasoning") => Some("rs_"),
+            Some("function_call") => Some("fc_"),
+            Some("custom_tool_call") => Some("ctc_"),
+            Some("tool_search_call") => Some("tsc_"),
+            Some("web_search_call") => Some("ws_"),
+            Some("computer_call") => Some("cu_"),
+            Some("file_search_call") => Some("fs_"),
+            Some("code_interpreter_call") => Some("ci_"),
+            Some("image_generation_call") => Some("ig_"),
+            Some("local_shell_call") => Some("ls_"),
+            Some("apply_patch_call") => Some("apc_"),
+            Some("mcp_call" | "mcp_list_tools" | "mcp_approval_request") => Some("mcp_"),
+            _ => None,
+        };
+        let invalid = match record.get("id") {
+            None => false,
+            Some(Value::String(id)) => {
+                // IDs returned by some relays use the generic `item_` form.
+                // Responses validation rejects those for typed tool items,
+                // so never forward them from conversation history.
+                id.starts_with("item_")
+                    || expected_prefix.is_some_and(|prefix| !id.starts_with(prefix))
+            }
+            Some(_) => true,
+        };
+        if invalid {
+            record.remove("id");
+            removed += 1;
+        }
+    }
+    removed
 }
 
 fn set_request_reasoning(body: &mut Value, effort: &str) {
@@ -4902,6 +4955,133 @@ mod hot_switch_tests {
         assert!(route.is_none());
 
         assert_eq!(body["model"], json!("requested-model"));
+    }
+
+    #[test]
+    fn responses_history_removes_ids_with_invalid_type_prefixes() {
+        let mut body = json!({
+            "model": "gpt-5",
+            "input": [
+                {
+                    "id": "item_message",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": []
+                },
+                {
+                    "id": "item_reasoning",
+                    "type": "reasoning",
+                    "summary": []
+                },
+                {
+                    "id": "item_function",
+                    "type": "function_call",
+                    "call_id": "call_keep",
+                    "name": "lookup",
+                    "arguments": "{}"
+                },
+                {
+                    "id": "item_custom",
+                    "type": "custom_tool_call",
+                    "call_id": "call_custom_keep",
+                    "name": "shell",
+                    "input": "dir"
+                },
+                {
+                    "id": "item_output_is_not_touched",
+                    "type": "function_call_output",
+                    "call_id": "call_keep",
+                    "output": "done"
+                }
+            ]
+        });
+
+        assert_eq!(sanitize_responses_history_item_ids(&mut body), 5);
+        assert!(body["input"][0].get("id").is_none());
+        assert!(body["input"][1].get("id").is_none());
+        assert!(body["input"][2].get("id").is_none());
+        assert_eq!(body["input"][2]["call_id"], json!("call_keep"));
+        assert!(body["input"][3].get("id").is_none());
+        assert_eq!(body["input"][3]["call_id"], json!("call_custom_keep"));
+        assert!(body["input"][4].get("id").is_none());
+        assert_eq!(body["input"][4]["call_id"], json!("call_keep"));
+    }
+
+    #[test]
+    fn responses_history_keeps_valid_ids_and_items_without_ids() {
+        let mut body = json!({
+            "input": [
+                {"id": "msg_valid", "type": "message", "content": []},
+                {"id": "rs_valid", "type": "reasoning", "summary": []},
+                {
+                    "id": "fc_valid",
+                    "type": "function_call",
+                    "call_id": "call_valid",
+                    "name": "lookup",
+                    "arguments": "{}"
+                },
+                {
+                    "id": "ctc_valid",
+                    "type": "custom_tool_call",
+                    "call_id": "call_custom",
+                    "name": "shell",
+                    "input": "dir"
+                },
+                {"type": "message", "role": "user", "content": "hello"},
+                "plain text input"
+            ]
+        });
+
+        let expected = body.clone();
+        assert_eq!(sanitize_responses_history_item_ids(&mut body), 0);
+        assert_eq!(body, expected);
+    }
+
+    #[test]
+    fn responses_history_removes_non_string_ids_for_known_item_types() {
+        let mut body = json!({
+            "input": [
+                {"id": 123, "type": "message", "content": []},
+                {"id": null, "type": "reasoning", "summary": []}
+            ]
+        });
+
+        assert_eq!(sanitize_responses_history_item_ids(&mut body), 2);
+        assert!(body["input"][0].get("id").is_none());
+        assert!(body["input"][1].get("id").is_none());
+    }
+
+    #[test]
+    fn responses_history_removes_generic_ids_from_new_tool_items() {
+        let mut body = json!({
+            "input": [
+                {
+                    "id": "item_e1069433",
+                    "type": "tool_search_call",
+                    "status": "completed"
+                },
+                {
+                    "id": "item_web_search",
+                    "type": "web_search_call",
+                    "status": "completed"
+                },
+                {
+                    "id": "tsc_valid",
+                    "type": "tool_search_call",
+                    "status": "completed"
+                },
+                {
+                    "id": "item_unknown",
+                    "type": "future_response_item"
+                }
+            ]
+        });
+
+        assert_eq!(sanitize_responses_history_item_ids(&mut body), 3);
+        assert!(body["input"][0].get("id").is_none());
+        assert!(body["input"][1].get("id").is_none());
+        assert_eq!(body["input"][2]["id"], json!("tsc_valid"));
+        assert!(body["input"][3].get("id").is_none());
     }
 
     #[test]

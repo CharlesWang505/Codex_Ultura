@@ -87,6 +87,20 @@ async fn bridge_routes_cover_all_current_paths() {
 }
 
 #[tokio::test]
+async fn core_runtime_api_mode_status_uses_real_implementation() {
+    let ctx = BridgeContext::core(Arc::new(CoreRuntimeService::new(
+        9239,
+        StatusStore::default(),
+    )));
+
+    let result = handle_bridge_request(ctx, "/api-mode/status", json!({})).await;
+
+    assert_eq!(result["status"], json!("ok"));
+    assert!(result["active"].is_boolean());
+    assert!(result["mode"].is_string());
+}
+
+#[tokio::test]
 async fn settings_get_includes_runtime_codex_app_version() {
     let ctx = BridgeContext::new(
         Arc::new(FakeSettings::with_codex_app_version("26.601.21317")),
@@ -880,11 +894,7 @@ fn install_market_script_rejects_checksum_mismatch_and_preserves_existing_file()
         codex_plus_core::script_market::install_market_script_content(&manager, &script, b"new")
             .unwrap_err();
 
-    assert!(
-        error
-            .to_string()
-            .contains("市场脚本完整性校验失败")
-    );
+    assert!(error.to_string().contains("市场脚本完整性校验失败"));
     assert_eq!(
         std::fs::read_to_string(user_dir.join("market-demo.js")).unwrap(),
         "old"
@@ -1157,6 +1167,32 @@ impl BridgeRuntimeService for FakeRuntime {
         Ok(
             json!({"status": "ok", "message": "后端已连接", "version": codex_plus_core::version::VERSION}),
         )
+    }
+
+    async fn api_mode_status(&self) -> anyhow::Result<Value> {
+        Ok(json!({
+            "status": "ok",
+            "active": true,
+            "mode": "api",
+            "provider": "Fake relay",
+            "hotSwitchEnabled": true,
+            "officialAuthenticated": false,
+            "accountLabel": "custom",
+            "restartRequired": false
+        }))
+    }
+
+    async fn logout_api_mode(&self) -> anyhow::Result<Value> {
+        Ok(json!({
+            "status": "ok",
+            "changed": true,
+            "active": false,
+            "mode": "signed_out",
+            "officialAuthenticated": false,
+            "accountLabel": "",
+            "restartRequired": true,
+            "message": "已退出 API 登录。"
+        }))
     }
 
     async fn codex_model_catalog(&self) -> anyhow::Result<Value> {

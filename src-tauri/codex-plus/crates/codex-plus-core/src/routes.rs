@@ -77,18 +77,8 @@ pub trait BridgeRuntimeService: Send + Sync {
     async fn open_devtools(&self) -> anyhow::Result<Value>;
     async fn open_manager(&self) -> anyhow::Result<Value>;
     async fn backend_status(&self) -> anyhow::Result<Value>;
-    async fn api_mode_status(&self) -> anyhow::Result<Value> {
-        Ok(json!({
-            "status": "failed",
-            "message": "当前运行时未接入 API 登录状态"
-        }))
-    }
-    async fn logout_api_mode(&self) -> anyhow::Result<Value> {
-        Ok(json!({
-            "status": "failed",
-            "message": "当前运行时未接入退出 API 登录"
-        }))
-    }
+    async fn api_mode_status(&self) -> anyhow::Result<Value>;
+    async fn logout_api_mode(&self) -> anyhow::Result<Value>;
     async fn codex_model_catalog(&self) -> anyhow::Result<Value>;
     async fn upstream_worktree_status(&self) -> anyhow::Result<Value>;
     async fn upstream_worktree_defaults(&self, payload: Value) -> anyhow::Result<Value>;
@@ -350,6 +340,155 @@ impl CoreRuntimeService {
     }
 }
 
+pub async fn core_api_mode_status() -> anyhow::Result<Value> {
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    let relay = crate::relay_config::default_relay_status();
+    let active_profile = settings.active_relay_profile();
+    let configured_profile = matches!(
+        active_profile.relay_mode,
+        crate::settings::RelayMode::PureApi | crate::settings::RelayMode::MixedApi
+    ) && (!active_profile.base_url.trim().is_empty()
+        || !active_profile.upstream_base_url.trim().is_empty()
+        || !active_profile.api_key.trim().is_empty());
+    let active = relay.configured || configured_profile || settings.hot_switch_enabled;
+    Ok(json!({
+        "status": "ok",
+        "active": active,
+        "mode": if active { "api" } else if relay.authenticated { "official" } else { "signed_out" },
+        "provider": active_profile.name,
+        "hotSwitchEnabled": settings.hot_switch_enabled,
+        "officialAuthenticated": relay.authenticated,
+        "accountLabel": relay.account_label,
+        "restartRequired": false
+    }))
+}
+
+pub async fn core_logout_api_mode() -> anyhow::Result<Value> {
+    let store = SettingsStore::default();
+    let current = store.load().unwrap_or_default();
+    let home = crate::relay_config::default_codex_home_dir();
+    let before = crate::relay_config::relay_status_from_home(&home);
+    let active_profile = current.active_relay_profile();
+    let configured_profile = matches!(
+        active_profile.relay_mode,
+        crate::settings::RelayMode::PureApi | crate::settings::RelayMode::MixedApi
+    ) && (!active_profile.base_url.trim().is_empty()
+        || !active_profile.upstream_base_url.trim().is_empty()
+        || !active_profile.api_key.trim().is_empty());
+    let active = before.configured || configured_profile || current.hot_switch_enabled;
+    if !active {
+        return Ok(json!({
+            "status": "ok",
+            "changed": false,
+            "active": false,
+            "mode": if before.authenticated { "official" } else { "signed_out" },
+            "officialAuthenticated": before.authenticated,
+            "accountLabel": before.account_label,
+            "restartRequired": false,
+            "message": "当前未启用 API 登录。"
+        }));
+    }
+
+    let fallback_auth = official_auth_fallback(&home, &current, before.authenticated);
+
+    let mut next = current.clone();
+    next.hot_switch_enabled = false;
+    next.relay_profiles_enabled = false;
+    next.floating_switch_enabled = false;
+    store.save(&next)?;
+
+    let clear_result =
+        crate::relay_config::clear_relay_config_to_home_with_auth_and_computer_use_guard(
+            &home,
+            fallback_auth.as_deref(),
+            current.computer_use_guard_enabled,
+        );
+    let clear_result = match clear_result {
+        Ok(result) => result,
+        Err(error) => {
+            let _ = store.save(&current);
+            return Err(error.context("退出 API 登录时清除 Codex custom provider 失败"));
+        }
+    };
+
+    let after = crate::relay_config::relay_status_from_home(&home);
+    let mode = if after.authenticated {
+        "official"
+    } else {
+        "signed_out"
+    };
+    let message = if after.authenticated {
+        "已退出 API 登录并恢复官方账号配置。请重启 Codex 使登录状态完全生效。"
+    } else {
+        "已退出 API 登录；未检测到可恢复的官方账号。请重启 Codex 后重新登录。"
+    };
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "bridge.api_mode_logout_ok",
+        json!({
+            "official_authenticated": after.authenticated,
+            "hot_switch_was_enabled": current.hot_switch_enabled,
+            "backup_path": clear_result.backup_path
+        }),
+    );
+    Ok(json!({
+        "status": "ok",
+        "changed": true,
+        "active": false,
+        "mode": mode,
+        "officialAuthenticated": after.authenticated,
+        "accountLabel": after.account_label,
+        "restartRequired": true,
+        "backupPath": clear_result.backup_path,
+        "message": message
+    }))
+}
+
+fn official_auth_fallback(
+    home: &std::path::Path,
+    settings: &crate::settings::BackendSettings,
+    live_authenticated: bool,
+) -> Option<String> {
+    if live_authenticated {
+        if let Ok(contents) = std::fs::read_to_string(home.join("auth.json")) {
+            if auth_contents_look_like_chatgpt(&contents) {
+                return Some(contents);
+            }
+        }
+    }
+
+    let profile_auth = settings
+        .relay_profiles
+        .iter()
+        .filter(|profile| {
+            profile.relay_mode == crate::settings::RelayMode::Official
+                && !profile.official_mix_api_key
+        })
+        .map(|profile| profile.auth_contents.as_str())
+        .find(|contents| auth_contents_look_like_chatgpt(contents));
+    if let Some(contents) = profile_auth {
+        return Some(contents.to_string());
+    }
+
+    let backup_root = home.join("backups");
+    let mut candidates = std::fs::read_dir(backup_root)
+        .ok()?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
+        .collect::<Vec<_>>();
+    candidates.sort_by_key(|entry| entry.file_name());
+    candidates.reverse();
+    for entry in candidates {
+        let path = entry.path().join("auth.json");
+        let Ok(contents) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        if auth_contents_look_like_chatgpt(&contents) {
+            return Some(contents);
+        }
+    }
+    None
+}
+
 #[async_trait]
 impl BridgeRuntimeService for CoreRuntimeService {
     async fn user_script_inventory(&self) -> anyhow::Result<Value> {
@@ -448,104 +587,11 @@ impl BridgeRuntimeService for CoreRuntimeService {
     }
 
     async fn api_mode_status(&self) -> anyhow::Result<Value> {
-        let settings = SettingsStore::default().load().unwrap_or_default();
-        let relay = crate::relay_config::default_relay_status();
-        let active = relay.configured || settings.hot_switch_enabled;
-        Ok(json!({
-            "status": "ok",
-            "active": active,
-            "mode": if active { "api" } else if relay.authenticated { "official" } else { "signed_out" },
-            "provider": settings.active_relay_profile().name,
-            "hotSwitchEnabled": settings.hot_switch_enabled,
-            "officialAuthenticated": relay.authenticated,
-            "accountLabel": relay.account_label,
-            "restartRequired": false
-        }))
+        core_api_mode_status().await
     }
 
     async fn logout_api_mode(&self) -> anyhow::Result<Value> {
-        let store = SettingsStore::default();
-        let current = store.load().unwrap_or_default();
-        let home = crate::relay_config::default_codex_home_dir();
-        let before = crate::relay_config::relay_status_from_home(&home);
-        let active = before.configured || current.hot_switch_enabled;
-        if !active {
-            return Ok(json!({
-                "status": "ok",
-                "changed": false,
-                "active": false,
-                "mode": if before.authenticated { "official" } else { "signed_out" },
-                "officialAuthenticated": before.authenticated,
-                "accountLabel": before.account_label,
-                "restartRequired": false,
-                "message": "当前未启用 API 登录。"
-            }));
-        }
-
-        let fallback_auth = if before.authenticated {
-            None
-        } else {
-            current
-                .relay_profiles
-                .iter()
-                .find(|profile| {
-                    profile.relay_mode == crate::settings::RelayMode::Official
-                        && !profile.official_mix_api_key
-                        && auth_contents_look_like_chatgpt(&profile.auth_contents)
-                })
-                .map(|profile| profile.auth_contents.clone())
-        };
-
-        let mut next = current.clone();
-        next.hot_switch_enabled = false;
-        next.relay_profiles_enabled = false;
-        next.floating_switch_enabled = false;
-        store.save(&next)?;
-
-        let clear_result =
-            crate::relay_config::clear_relay_config_to_home_with_auth_and_computer_use_guard(
-                &home,
-                fallback_auth.as_deref(),
-                current.computer_use_guard_enabled,
-            );
-        let clear_result = match clear_result {
-            Ok(result) => result,
-            Err(error) => {
-                let _ = store.save(&current);
-                return Err(error.context("退出 API 登录时清除 Codex custom provider 失败"));
-            }
-        };
-
-        let after = crate::relay_config::relay_status_from_home(&home);
-        let mode = if after.authenticated {
-            "official"
-        } else {
-            "signed_out"
-        };
-        let message = if after.authenticated {
-            "已退出 API 登录并恢复官方账号配置。请重启 Codex 使登录状态完全生效。"
-        } else {
-            "已退出 API 登录；未检测到可恢复的官方账号。请重启 Codex 后重新登录。"
-        };
-        let _ = crate::diagnostic_log::append_diagnostic_log(
-            "bridge.api_mode_logout_ok",
-            json!({
-                "official_authenticated": after.authenticated,
-                "hot_switch_was_enabled": current.hot_switch_enabled,
-                "backup_path": clear_result.backup_path
-            }),
-        );
-        Ok(json!({
-            "status": "ok",
-            "changed": true,
-            "active": false,
-            "mode": mode,
-            "officialAuthenticated": after.authenticated,
-            "accountLabel": after.account_label,
-            "restartRequired": true,
-            "backupPath": clear_result.backup_path,
-            "message": message
-        }))
+        core_logout_api_mode().await
     }
 
     async fn codex_model_catalog(&self) -> anyhow::Result<Value> {

@@ -2548,18 +2548,19 @@
     return !!rect
       && rect.width > 0
       && rect.height > 0
-      && rect.left < window.innerWidth * 0.45
-      && rect.bottom > window.innerHeight * 0.55;
+      && rect.left < window.innerWidth * 0.7
+      && rect.bottom > window.innerHeight * 0.4;
   }
 
   function codexApiLogoutSettingsItem() {
-    return Array.from(document.querySelectorAll("[role='menuitem'], [data-radix-collection-item]"))
+    const items = Array.from(document.querySelectorAll("[role='menuitem'], [data-radix-collection-item]"))
       .filter((item) => item instanceof HTMLElement && item.getBoundingClientRect().width > 0)
-      .find((item) => {
-        const label = String(item.textContent || "").replace(/\s+/g, " ").trim();
-        if (!/^(设置|Settings)(?:\s+Ctrl\+,)?$/i.test(label)) return false;
-        return codexApiLogoutLooksLikeAccountMenu(codexApiLogoutMenuRoot(item));
-      }) || null;
+      .filter((item) => /^(设置|Settings)(?:\s*Ctrl\+,)?$/i.test(
+        String(item.textContent || "").replace(/\s+/g, " ").trim(),
+      ));
+    return items.find((item) => codexApiLogoutLooksLikeAccountMenu(codexApiLogoutMenuRoot(item)))
+      || items[0]
+      || null;
   }
 
   function createCodexApiLogoutMenuItem(settingsItem) {
@@ -2615,6 +2616,24 @@
     if (!settingsItem || settingsItem.parentElement?.querySelector("[data-codex-api-logout]")) return;
     const item = createCodexApiLogoutMenuItem(settingsItem);
     settingsItem.insertAdjacentElement("afterend", item);
+  }
+
+  function installCodexApiLogoutMenuWatcher() {
+    if (window.__codexApiLogoutMenuWatcherInstalled) return;
+    window.__codexApiLogoutMenuWatcherInstalled = "1";
+    let retryTimer = 0;
+    const retry = () => {
+      if (retryTimer) return;
+      retryTimer = window.setTimeout(() => {
+        retryTimer = 0;
+        if (codexPlusBackendStatus.status === "ok") {
+          void loadCodexApiModeState(false).then(() => installCodexApiLogoutMenuItem());
+        } else {
+          installCodexApiLogoutMenuItem();
+        }
+      }, 30);
+    };
+    document.addEventListener("pointerdown", retry, true);
   }
 
   async function openManagerFromCodex() {
@@ -9157,6 +9176,7 @@
     installCodexPlusMenu();
     localizeCodexMenus();
     installCodexApiLogoutMenuItem();
+    installCodexApiLogoutMenuWatcher();
     scheduleBackendHeartbeat();
     installDeleteButtonEventDelegation();
     installSessionActionEventDelegation();

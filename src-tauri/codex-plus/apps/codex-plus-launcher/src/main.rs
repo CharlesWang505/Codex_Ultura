@@ -555,6 +555,14 @@ impl BridgeRuntimeService for LauncherRuntimeService {
         )
     }
 
+    async fn api_mode_status(&self) -> anyhow::Result<Value> {
+        codex_plus_core::routes::core_api_mode_status().await
+    }
+
+    async fn logout_api_mode(&self) -> anyhow::Result<Value> {
+        codex_plus_core::routes::core_logout_api_mode().await
+    }
+
     async fn codex_model_catalog(&self) -> anyhow::Result<Value> {
         Ok(codex_plus_core::model_catalog::read_codex_model_catalog().await)
     }
