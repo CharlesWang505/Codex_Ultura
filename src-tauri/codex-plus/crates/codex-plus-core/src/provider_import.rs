@@ -209,6 +209,11 @@ fn relay_profile_from_request(
         model_insert_mode: Default::default(),
         model_list: String::new(),
         model_windows: String::new(),
+        model_vlm: String::new(),
+        vlm_api_key: String::new(),
+        vlm_api_key_saved: false,
+        vlm_model: String::new(),
+        vlm_base_url: String::new(),
         user_agent: String::new(),
         reasoning_dialect: Default::default(),
     }

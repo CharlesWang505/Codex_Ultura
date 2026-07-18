@@ -77,6 +77,18 @@ pub trait BridgeRuntimeService: Send + Sync {
     async fn open_devtools(&self) -> anyhow::Result<Value>;
     async fn open_manager(&self) -> anyhow::Result<Value>;
     async fn backend_status(&self) -> anyhow::Result<Value>;
+    async fn api_mode_status(&self) -> anyhow::Result<Value> {
+        Ok(json!({
+            "status": "failed",
+            "message": "当前运行时未接入 API 登录状态"
+        }))
+    }
+    async fn logout_api_mode(&self) -> anyhow::Result<Value> {
+        Ok(json!({
+            "status": "failed",
+            "message": "当前运行时未接入退出 API 登录"
+        }))
+    }
     async fn codex_model_catalog(&self) -> anyhow::Result<Value>;
     async fn upstream_worktree_status(&self) -> anyhow::Result<Value>;
     async fn upstream_worktree_defaults(&self, payload: Value) -> anyhow::Result<Value>;
@@ -156,6 +168,8 @@ pub async fn handle_bridge_request(
         "/devtools/open" => ctx.runtime.open_devtools().await,
         "/manager/open" => ctx.runtime.open_manager().await,
         "/backend/status" => ctx.runtime.backend_status().await,
+        "/api-mode/status" => ctx.runtime.api_mode_status().await,
+        "/api-mode/logout" => ctx.runtime.logout_api_mode().await,
         "/codex-model-catalog" | "/codex-config-model" => ctx.runtime.codex_model_catalog().await,
         "/diagnostics/log" => diagnostic_log_value(payload.clone()),
         "/upstream-worktree/status" => ctx.runtime.upstream_worktree_status().await,
@@ -433,6 +447,107 @@ impl BridgeRuntimeService for CoreRuntimeService {
         Ok(json!({"status": "ok", "message": "后端已连接", "version": crate::version::VERSION}))
     }
 
+    async fn api_mode_status(&self) -> anyhow::Result<Value> {
+        let settings = SettingsStore::default().load().unwrap_or_default();
+        let relay = crate::relay_config::default_relay_status();
+        let active = relay.configured || settings.hot_switch_enabled;
+        Ok(json!({
+            "status": "ok",
+            "active": active,
+            "mode": if active { "api" } else if relay.authenticated { "official" } else { "signed_out" },
+            "provider": settings.active_relay_profile().name,
+            "hotSwitchEnabled": settings.hot_switch_enabled,
+            "officialAuthenticated": relay.authenticated,
+            "accountLabel": relay.account_label,
+            "restartRequired": false
+        }))
+    }
+
+    async fn logout_api_mode(&self) -> anyhow::Result<Value> {
+        let store = SettingsStore::default();
+        let current = store.load().unwrap_or_default();
+        let home = crate::relay_config::default_codex_home_dir();
+        let before = crate::relay_config::relay_status_from_home(&home);
+        let active = before.configured || current.hot_switch_enabled;
+        if !active {
+            return Ok(json!({
+                "status": "ok",
+                "changed": false,
+                "active": false,
+                "mode": if before.authenticated { "official" } else { "signed_out" },
+                "officialAuthenticated": before.authenticated,
+                "accountLabel": before.account_label,
+                "restartRequired": false,
+                "message": "当前未启用 API 登录。"
+            }));
+        }
+
+        let fallback_auth = if before.authenticated {
+            None
+        } else {
+            current
+                .relay_profiles
+                .iter()
+                .find(|profile| {
+                    profile.relay_mode == crate::settings::RelayMode::Official
+                        && !profile.official_mix_api_key
+                        && auth_contents_look_like_chatgpt(&profile.auth_contents)
+                })
+                .map(|profile| profile.auth_contents.clone())
+        };
+
+        let mut next = current.clone();
+        next.hot_switch_enabled = false;
+        next.relay_profiles_enabled = false;
+        next.floating_switch_enabled = false;
+        store.save(&next)?;
+
+        let clear_result =
+            crate::relay_config::clear_relay_config_to_home_with_auth_and_computer_use_guard(
+                &home,
+                fallback_auth.as_deref(),
+                current.computer_use_guard_enabled,
+            );
+        let clear_result = match clear_result {
+            Ok(result) => result,
+            Err(error) => {
+                let _ = store.save(&current);
+                return Err(error.context("退出 API 登录时清除 Codex custom provider 失败"));
+            }
+        };
+
+        let after = crate::relay_config::relay_status_from_home(&home);
+        let mode = if after.authenticated {
+            "official"
+        } else {
+            "signed_out"
+        };
+        let message = if after.authenticated {
+            "已退出 API 登录并恢复官方账号配置。请重启 Codex 使登录状态完全生效。"
+        } else {
+            "已退出 API 登录；未检测到可恢复的官方账号。请重启 Codex 后重新登录。"
+        };
+        let _ = crate::diagnostic_log::append_diagnostic_log(
+            "bridge.api_mode_logout_ok",
+            json!({
+                "official_authenticated": after.authenticated,
+                "hot_switch_was_enabled": current.hot_switch_enabled,
+                "backup_path": clear_result.backup_path
+            }),
+        );
+        Ok(json!({
+            "status": "ok",
+            "changed": true,
+            "active": false,
+            "mode": mode,
+            "officialAuthenticated": after.authenticated,
+            "accountLabel": after.account_label,
+            "restartRequired": true,
+            "backupPath": clear_result.backup_path,
+            "message": message
+        }))
+    }
+
     async fn codex_model_catalog(&self) -> anyhow::Result<Value> {
         Ok(crate::model_catalog::read_codex_model_catalog().await)
     }
@@ -452,6 +567,20 @@ impl BridgeRuntimeService for CoreRuntimeService {
     async fn upstream_worktree_create(&self, payload: Value) -> anyhow::Result<Value> {
         Ok(crate::upstream_worktree::create_response(&payload))
     }
+}
+
+fn auth_contents_look_like_chatgpt(contents: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(contents) else {
+        return false;
+    };
+    value
+        .get("auth_mode")
+        .and_then(Value::as_str)
+        .is_some_and(|mode| mode.eq_ignore_ascii_case("chatgpt"))
+        || value
+            .get("tokens")
+            .and_then(Value::as_object)
+            .is_some_and(|tokens| !tokens.is_empty())
 }
 
 struct UnavailableDataService;

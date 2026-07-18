@@ -618,15 +618,20 @@ async fn try_inject_with_context(
         .load()
         .unwrap_or_default();
     let script = codex_plus_core::assets::injection_script_with_settings(helper_port, &settings);
+    let theme_bundle = codex_plus_core::theme_studio::ThemeStudioManager::default()
+        .build_runtime_bundle()
+        .unwrap_or_default();
     let user_bundle = runtime
         .user_scripts
         .build_enabled_bundle()
         .unwrap_or_default();
-    let new_document_scripts = if user_bundle.is_empty() {
-        vec![script]
-    } else {
-        vec![script, user_bundle]
-    };
+    let mut new_document_scripts = vec![script];
+    if !theme_bundle.trim().is_empty() {
+        new_document_scripts.push(theme_bundle);
+    }
+    if !user_bundle.trim().is_empty() {
+        new_document_scripts.push(user_bundle);
+    }
     codex_plus_core::bridge::install_bridge(
         websocket_url,
         codex_plus_core::bridge::BRIDGE_BINDING_NAME,

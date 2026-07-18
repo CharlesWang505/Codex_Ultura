@@ -10,8 +10,9 @@ use codex_plus_core::settings::{
     BackendSettings, HotSwitchModelMapping, RelayProfile, SettingsStore,
 };
 use codex_plus_core::status::{LaunchStatus, StatusStore};
+use codex_plus_core::theme_studio::{ThemeStudioManager, ThemeStudioPayload, ThemeStudioSettings};
 use codex_plus_core::user_scripts::UserScriptManager;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::codex_install::{self as install, InstallActionResult, InstallOptions};
@@ -240,6 +241,7 @@ pub struct ProviderDoctorPayload {
 #[serde(rename_all = "camelCase")]
 pub struct EnvConflictsPayload {
     pub conflicts: Vec<codex_plus_core::env_conflicts::EnvConflict>,
+    pub environment: codex_plus_core::relay_environment::RelayEnvironmentReport,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -346,6 +348,36 @@ pub struct WatcherPayload {
 pub struct ScriptMarketPayload {
     pub market: Value,
     pub user_scripts: Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeStudioCommandPayload {
+    pub settings: ThemeStudioSettings,
+    pub settings_path: String,
+    pub package_format: String,
+    pub runtime_connected: bool,
+    pub runtime_status: String,
+    pub debug_port: u16,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveThemeStudioRequest {
+    pub settings: ThemeStudioSettings,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportThemePackageRequest {
+    pub file_name: String,
+    pub contents_base64: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteThemeRequest {
+    pub theme_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2116,6 +2148,121 @@ pub fn delete_user_script(key: String) -> CommandResult<SettingsPayload> {
 }
 
 #[tauri::command]
+pub async fn load_codex_theme_studio() -> CommandResult<ThemeStudioCommandPayload> {
+    let manager = ThemeStudioManager::default();
+    let runtime = inspect_theme_runtime().await;
+    let payload = theme_studio_command_payload(manager.payload(), &runtime);
+    if runtime.connected {
+        ok("Codex 主题工坊已加载。", payload)
+    } else {
+        warning(&runtime.message, payload)
+    }
+}
+
+#[tauri::command]
+pub async fn save_codex_theme_studio(
+    request: SaveThemeStudioRequest,
+) -> CommandResult<ThemeStudioCommandPayload> {
+    let manager = ThemeStudioManager::default();
+    if let Err(error) = manager.save(request.settings) {
+        let runtime = ThemeRuntimeState::disconnected(format!("主题保存失败：{error}"));
+        return failed(
+            &runtime.message,
+            theme_studio_command_payload(manager.payload(), &runtime),
+        );
+    }
+    let runtime = apply_theme_runtime(&manager).await;
+    let payload = theme_studio_command_payload(manager.payload(), &runtime);
+    if runtime.connected {
+        ok("主题已保存并应用到当前 Codex。", payload)
+    } else {
+        warning(
+            &format!(
+                "主题已保存；{} 下次通过 Compass 启动 Codex 时会自动恢复。",
+                runtime.message
+            ),
+            payload,
+        )
+    }
+}
+
+#[tauri::command]
+pub async fn reload_codex_theme_studio() -> CommandResult<ThemeStudioCommandPayload> {
+    let manager = ThemeStudioManager::default();
+    let runtime = apply_theme_runtime(&manager).await;
+    let payload = theme_studio_command_payload(manager.payload(), &runtime);
+    if runtime.connected {
+        ok("当前主题已重新加载。", payload)
+    } else {
+        warning(&runtime.message, payload)
+    }
+}
+
+#[tauri::command]
+pub async fn reset_codex_theme_studio() -> CommandResult<ThemeStudioCommandPayload> {
+    let manager = ThemeStudioManager::default();
+    if let Err(error) = manager.reset() {
+        let runtime = ThemeRuntimeState::disconnected(format!("恢复默认主题失败：{error}"));
+        return failed(
+            &runtime.message,
+            theme_studio_command_payload(manager.payload(), &runtime),
+        );
+    }
+    let runtime = apply_theme_runtime(&manager).await;
+    let payload = theme_studio_command_payload(manager.payload(), &runtime);
+    if runtime.connected {
+        ok("已关闭主题并恢复 Codex 默认外观。", payload)
+    } else {
+        warning(
+            "主题配置已恢复默认；当前未连接 Codex，重启后生效。",
+            payload,
+        )
+    }
+}
+
+#[tauri::command]
+pub async fn import_codex_theme_package(
+    request: ImportThemePackageRequest,
+) -> CommandResult<ThemeStudioCommandPayload> {
+    let manager = ThemeStudioManager::default();
+    if let Err(error) = manager.import_package(&request.file_name, &request.contents_base64) {
+        let runtime = inspect_theme_runtime().await;
+        return failed(
+            &format!("主题包导入失败：{error}"),
+            theme_studio_command_payload(manager.payload(), &runtime),
+        );
+    }
+    let runtime = apply_theme_runtime(&manager).await;
+    let payload = theme_studio_command_payload(manager.payload(), &runtime);
+    if runtime.connected {
+        ok("主题包已导入并选中。", payload)
+    } else {
+        warning("主题包已导入；当前未连接 Codex。", payload)
+    }
+}
+
+#[tauri::command]
+pub async fn delete_codex_theme(
+    request: DeleteThemeRequest,
+) -> CommandResult<ThemeStudioCommandPayload> {
+    let manager = ThemeStudioManager::default();
+    if let Err(error) = manager.delete_theme(request.theme_id.trim()) {
+        let runtime = inspect_theme_runtime().await;
+        return failed(
+            &format!("删除主题失败：{error}"),
+            theme_studio_command_payload(manager.payload(), &runtime),
+        );
+    }
+    let runtime = apply_theme_runtime(&manager).await;
+    let payload = theme_studio_command_payload(manager.payload(), &runtime);
+    if runtime.connected {
+        ok("自定义主题已删除。", payload)
+    } else {
+        warning("自定义主题已删除；当前未连接 Codex。", payload)
+    }
+}
+
+#[tauri::command]
 pub fn open_external_url(url: String) -> CommandResult<Value> {
     let trimmed = url.trim();
     if !(trimmed.starts_with("https://") || trimmed.starts_with("http://")) {
@@ -2603,12 +2750,21 @@ pub fn read_relay_files() -> CommandResult<RelayFilesPayload> {
 #[tauri::command]
 pub fn check_env_conflicts() -> CommandResult<EnvConflictsPayload> {
     let conflicts = codex_plus_core::env_conflicts::detect_env_conflicts();
-    let message = if conflicts.is_empty() {
-        "未检测到会覆盖 Codex 供应商配置的 OPENAI 环境变量。"
-    } else {
+    let environment = codex_plus_core::relay_environment::inspect_relay_environment();
+    let message = if !conflicts.is_empty() {
         "检测到可能覆盖 Codex 供应商配置的 OPENAI 环境变量。"
+    } else if !environment.all_passed() {
+        "未检测到可清理的 OPENAI 环境变量，但发现可能影响中转连接的环境项。"
+    } else {
+        "未检测到会覆盖 Codex 供应商配置的环境项。"
     };
-    ok(message, EnvConflictsPayload { conflicts })
+    ok(
+        message,
+        EnvConflictsPayload {
+            conflicts,
+            environment,
+        },
+    )
 }
 
 #[tauri::command]
@@ -4191,6 +4347,178 @@ fn market_script_payload(script: &MarketScript, installed: &BTreeMap<String, Str
     })
 }
 
+struct ThemeRuntimeState {
+    connected: bool,
+    status: String,
+    message: String,
+    debug_port: u16,
+}
+
+impl ThemeRuntimeState {
+    fn disconnected(message: String) -> Self {
+        Self {
+            connected: false,
+            status: "disconnected".to_string(),
+            message,
+            debug_port: theme_debug_port(),
+        }
+    }
+}
+
+fn theme_debug_port() -> u16 {
+    StatusStore::default()
+        .load_latest()
+        .ok()
+        .flatten()
+        .and_then(|status| status.debug_port)
+        .unwrap_or(9222)
+}
+
+async fn inspect_theme_runtime() -> ThemeRuntimeState {
+    let debug_port = theme_debug_port();
+    let targets = match codex_plus_core::cdp::list_targets(debug_port).await {
+        Ok(targets) => targets,
+        Err(error) => {
+            return ThemeRuntimeState {
+                connected: false,
+                status: "disconnected".to_string(),
+                message: format!("尚未连接 Codex 调试端口 {debug_port}：{error}"),
+                debug_port,
+            };
+        }
+    };
+    let target = match codex_plus_core::cdp::pick_injectable_codex_page_target(&targets) {
+        Ok(target) => target,
+        Err(error) => {
+            return ThemeRuntimeState {
+                connected: false,
+                status: "no_page".to_string(),
+                message: format!("未找到可应用主题的 Codex 页面：{error}"),
+                debug_port,
+            };
+        }
+    };
+    let Some(websocket_url) = target.web_socket_debugger_url.as_deref() else {
+        return ThemeRuntimeState {
+            connected: false,
+            status: "no_debugger".to_string(),
+            message: "Codex 页面没有提供调试连接。".to_string(),
+            debug_port,
+        };
+    };
+    let response = match codex_plus_core::bridge::evaluate_script(
+        websocket_url,
+        r#"JSON.stringify(window.__codexCompassThemeRuntime || { status: "not_loaded", themeId: "" })"#,
+    )
+    .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            return ThemeRuntimeState {
+                connected: false,
+                status: "evaluate_failed".to_string(),
+                message: format!("读取 Codex 主题状态失败：{error}"),
+                debug_port,
+            };
+        }
+    };
+    let runtime = response
+        .pointer("/result/result/value")
+        .and_then(Value::as_str)
+        .and_then(|value| serde_json::from_str::<Value>(value).ok())
+        .unwrap_or_else(|| json!({ "status": "not_loaded" }));
+    let status = runtime
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("not_loaded")
+        .to_string();
+    let message = match status.as_str() {
+        "loaded" => {
+            let name = runtime
+                .get("themeName")
+                .and_then(Value::as_str)
+                .unwrap_or("当前主题");
+            format!("已连接 Codex，{name}正在运行。")
+        }
+        "disabled" => "已连接 Codex，当前使用默认外观。".to_string(),
+        _ => "已连接 Codex，主题运行时尚未加载。".to_string(),
+    };
+    ThemeRuntimeState {
+        connected: true,
+        status,
+        message,
+        debug_port,
+    }
+}
+
+async fn apply_theme_runtime(manager: &ThemeStudioManager) -> ThemeRuntimeState {
+    let debug_port = theme_debug_port();
+    let bundle = match manager.build_runtime_bundle() {
+        Ok(bundle) => bundle,
+        Err(error) => {
+            return ThemeRuntimeState {
+                connected: false,
+                status: "bundle_failed".to_string(),
+                message: format!("生成主题运行时失败：{error}"),
+                debug_port,
+            };
+        }
+    };
+    let targets = match codex_plus_core::cdp::list_targets(debug_port).await {
+        Ok(targets) => targets,
+        Err(error) => {
+            return ThemeRuntimeState {
+                connected: false,
+                status: "disconnected".to_string(),
+                message: format!("尚未连接 Codex 调试端口 {debug_port}：{error}"),
+                debug_port,
+            };
+        }
+    };
+    let target = match codex_plus_core::cdp::pick_injectable_codex_page_target(&targets) {
+        Ok(target) => target,
+        Err(error) => {
+            return ThemeRuntimeState {
+                connected: false,
+                status: "no_page".to_string(),
+                message: format!("未找到可应用主题的 Codex 页面：{error}"),
+                debug_port,
+            };
+        }
+    };
+    let Some(websocket_url) = target.web_socket_debugger_url.as_deref() else {
+        return ThemeRuntimeState {
+            connected: false,
+            status: "no_debugger".to_string(),
+            message: "Codex 页面没有提供调试连接。".to_string(),
+            debug_port,
+        };
+    };
+    if let Err(error) = codex_plus_core::bridge::evaluate_script(websocket_url, &bundle).await {
+        return ThemeRuntimeState {
+            connected: false,
+            status: "apply_failed".to_string(),
+            message: format!("主题应用失败：{error}"),
+            debug_port,
+        };
+    }
+    inspect_theme_runtime().await
+}
+
+fn theme_studio_command_payload(
+    payload: ThemeStudioPayload,
+    runtime: &ThemeRuntimeState,
+) -> ThemeStudioCommandPayload {
+    ThemeStudioCommandPayload {
+        settings: payload.settings,
+        settings_path: payload.settings_path,
+        package_format: payload.package_format,
+        runtime_connected: runtime.connected,
+        runtime_status: runtime.status.clone(),
+        debug_port: runtime.debug_port,
+    }
+}
+
 fn default_user_script_manager() -> UserScriptManager {
     let config_dir = user_scripts_config_dir();
     UserScriptManager::new(
@@ -4762,6 +5090,7 @@ mod tests {
         let previous_openai = std::env::var_os(test_openai_name);
         let previous_codex_home = std::env::var_os("CODEX_HOME");
         let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join(".env"), "OPENAI_API_KEY=secret\n").unwrap();
         unsafe {
             std::env::set_var(test_openai_name, "sk-test");
             std::env::set_var("CODEX_HOME", temp.path());
@@ -4782,6 +5111,11 @@ mod tests {
                 .conflicts
                 .iter()
                 .any(|item| item.name == "CODEX_HOME")
+        );
+        assert!(check.payload.environment.codex_env_file.exists);
+        assert_eq!(
+            check.payload.environment.codex_env_file.path,
+            temp.path().join(".env").to_string_lossy()
         );
 
         codex_plus_core::env_conflicts::remove_process_env_conflicts_for_tests(

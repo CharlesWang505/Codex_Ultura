@@ -9,12 +9,13 @@ use tokio::sync::RwLock;
 use super::protocol::{RemoteMessage, unix_timestamp_ms};
 
 pub const MONITOR_EVENT: &str = "remote-control-monitor";
+pub const STATUS_EVENT: &str = "remote-control-status";
 const MAX_SESSIONS: usize = 24;
 const MAX_MESSAGES: usize = 120;
 const MAX_ACTIVITIES: usize = 80;
 const MAX_MESSAGE_CHARS: usize = 64_000;
 const MAX_ACTIVITY_CHARS: usize = 8_000;
-const EMIT_INTERVAL_MS: u64 = 50;
+const EMIT_INTERVAL_MS: u64 = 100;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -81,6 +82,10 @@ impl RemoteMonitor {
     pub async fn snapshot(&self) -> RemoteMonitorSnapshot {
         let state = self.state.read().await;
         snapshot_from_state(&state)
+    }
+
+    pub async fn status_changed(&self) {
+        let _ = self.app.emit(STATUS_EVENT, ());
     }
 
     pub async fn active_count(&self) -> usize {

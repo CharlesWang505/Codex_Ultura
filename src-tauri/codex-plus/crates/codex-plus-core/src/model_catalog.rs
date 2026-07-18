@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::settings::{BackendSettings, RelayProfile, SettingsStore};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 const BASE_URL_ENV_KEYS: &[&str] = &[
     "CODEX_PLUS_OPENAI_BASE_URL",
@@ -76,6 +76,7 @@ pub async fn read_codex_model_catalog() -> Value {
                 "provider_name": "",
                 "default_model": "",
                 "models": [],
+                "modelMetadata": {},
                 "excluded_models": [],
                 "sources": [],
                 "responses_api": responses_api_status("unknown", "", "")
@@ -95,6 +96,7 @@ fn relay_profile_model_catalog_value(home: &Path, profile: &RelayProfile) -> Val
         profile.name.trim()
     };
     let model_count = models.len();
+    let model_metadata = model_ui_metadata_map(&models);
     json!({
         "status": if models.is_empty() { "not_configured" } else { "ok" },
         "path": home.join("config.toml").to_string_lossy(),
@@ -103,6 +105,7 @@ fn relay_profile_model_catalog_value(home: &Path, profile: &RelayProfile) -> Val
         "provider_name": provider_name,
         "default_model": default_model,
         "models": models,
+        "modelMetadata": model_metadata,
         "excluded_models": [],
         "sources": [
             {
@@ -184,6 +187,13 @@ fn hot_switch_model_catalog_value(home: &Path, settings: &BackendSettings) -> Va
     let default_model = crate::hot_switch_mapping::hot_switch_default_model(settings)
         .or_else(|| models.first().cloned())
         .unwrap_or_default();
+    let configured_model = configured_model_from_home(home);
+    let current_model = models
+        .iter()
+        .find(|model| **model == configured_model)
+        .cloned()
+        .unwrap_or_else(|| default_model.clone());
+    let model_metadata = hot_switch_model_ui_metadata_map(settings, &models);
     let sources = settings
         .relay_profiles
         .iter()
@@ -221,16 +231,30 @@ fn hot_switch_model_catalog_value(home: &Path, settings: &BackendSettings) -> Va
     json!({
         "status": if models.is_empty() { "not_configured" } else { "ok" },
         "path": home.join("config.toml").to_string_lossy(),
-        "model": default_model,
+        "model": current_model,
         "model_provider": "codex-plus-hot-switch",
         "provider_name": "8787 热切换",
         "default_model": default_model,
         "models": models,
         "model_descriptors": model_descriptors,
+        "modelMetadata": model_metadata,
         "excluded_models": excluded_models,
         "sources": sources,
         "responses_api": responses_api_status("unknown", "", "")
     })
+}
+
+fn configured_model_from_home(home: &Path) -> String {
+    let (_, effective, error) = load_codex_config(&home.join("config.toml"));
+    if error.is_some() {
+        return String::new();
+    }
+    let model = string_value(effective.get("model"));
+    if model.is_empty() {
+        string_value(effective.get("default_model"))
+    } else {
+        model
+    }
 }
 
 fn relay_profile_model_ids(profile: &RelayProfile) -> Vec<String> {
@@ -244,6 +268,32 @@ fn relay_profile_model_ids(profile: &RelayProfile) -> Vec<String> {
             .map(ToString::to_string)
             .collect(),
     )
+}
+
+fn model_ui_metadata_map(models: &[String]) -> Value {
+    let mut metadata = Map::new();
+    for model in models {
+        if let Some(value) = crate::model_suffix::model_ui_metadata(model) {
+            metadata.insert(model.clone(), value);
+        }
+    }
+    Value::Object(metadata)
+}
+
+fn hot_switch_model_ui_metadata_map(settings: &BackendSettings, models: &[String]) -> Value {
+    let mut metadata = Map::new();
+    for model in models {
+        let value = crate::model_suffix::model_ui_metadata(model).or_else(|| {
+            crate::hot_switch_mapping::resolve_hot_switch_route(settings, model)
+                .ok()
+                .flatten()
+                .and_then(|route| crate::model_suffix::model_ui_metadata(&route.upstream_model))
+        });
+        if let Some(value) = value {
+            metadata.insert(model.clone(), value);
+        }
+    }
+    Value::Object(metadata)
 }
 
 pub async fn read_codex_model_catalog_from_home(
@@ -278,6 +328,7 @@ pub async fn read_codex_model_catalog_from_home(
             "provider_name": provider_name,
             "default_model": "",
             "models": [],
+            "modelMetadata": {},
             "excluded_models": [],
             "sources": [],
             "responses_api": responses_api_status("unknown", "", "")
@@ -333,6 +384,7 @@ pub async fn read_codex_model_catalog_from_home(
         "not_configured"
     };
     let responses_api = preferred_responses_api_status(&source_statuses);
+    let model_metadata = model_ui_metadata_map(&models);
 
     json!({
         "status": status,
@@ -342,6 +394,7 @@ pub async fn read_codex_model_catalog_from_home(
         "provider_name": provider_name,
         "default_model": default_model,
         "models": models,
+        "modelMetadata": model_metadata,
         "excluded_models": [],
         "sources": source_statuses,
         "responses_api": responses_api
@@ -1146,6 +1199,58 @@ base_url = "http://127.0.0.1:58321/v1"
         assert_eq!(descriptors[0]["displayName"], "gpt-5.5 · 豆芽");
         assert_eq!(descriptors[1]["displayName"], "gpt-5.5 · 乾");
         assert!(excluded.iter().any(|model| model == "gpt-5.5"));
+        assert_eq!(catalog["default_model"], "gpt-5.5--cc-a");
+    }
+
+    #[test]
+    fn hot_switch_catalog_uses_configured_renderer_slug_as_current_model() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::write(
+            home.path().join("config.toml"),
+            "model = \"gpt-5.5--cc-b\"\n",
+        )
+        .unwrap();
+        let settings = BackendSettings {
+            hot_switch_enabled: true,
+            hot_switch_model_routing_enabled: true,
+            hot_switch_relay_id: "a".to_string(),
+            hot_switch_model: "gpt-5.5".to_string(),
+            relay_profiles: vec![
+                RelayProfile {
+                    id: "a".to_string(),
+                    name: "豆芽".to_string(),
+                    model_list: "gpt-5.5".to_string(),
+                    ..RelayProfile::default()
+                },
+                RelayProfile {
+                    id: "b".to_string(),
+                    name: "乾".to_string(),
+                    model_list: "gpt-5.5".to_string(),
+                    ..RelayProfile::default()
+                },
+            ],
+            hot_switch_model_mappings: vec![
+                HotSwitchModelMapping {
+                    model: "gpt-5.5".to_string(),
+                    upstream_model: "gpt-5.5".to_string(),
+                    relay_id: "a".to_string(),
+                    candidate_relay_ids: vec!["a".to_string(), "b".to_string()],
+                    ..HotSwitchModelMapping::default()
+                },
+                HotSwitchModelMapping {
+                    model: "gpt-5.5".to_string(),
+                    upstream_model: "gpt-5.5".to_string(),
+                    relay_id: "b".to_string(),
+                    candidate_relay_ids: vec!["a".to_string(), "b".to_string()],
+                    ..HotSwitchModelMapping::default()
+                },
+            ],
+            ..BackendSettings::default()
+        };
+
+        let catalog = hot_switch_model_catalog_value(home.path(), &settings);
+
+        assert_eq!(catalog["model"], "gpt-5.5--cc-b");
         assert_eq!(catalog["default_model"], "gpt-5.5--cc-a");
     }
 }

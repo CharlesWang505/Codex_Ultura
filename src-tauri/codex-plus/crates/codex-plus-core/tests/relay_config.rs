@@ -238,12 +238,12 @@ fn reports_relay_configured_when_required_keys_exist() {
         temp.path().join("config.toml"),
         r#"model = "gpt-5"
 model_provider = "custom"
-OPENAI_API_KEY = "sk-should-be-removed"
+OPENAI_API_KEY = "test-api-key-should-be-removed"
 [model_providers.custom]
 name = "custom"
 wire_api = "responses"
 requires_openai_auth = true
-base_url = "http://192.168.188.245:3001/v1"
+base_url = "http://192.0.2.10:3001/v1"
 experimental_bearer_token = "sk-test-redacted"
 "#,
     )
@@ -297,7 +297,7 @@ model_provider = "custom1"
 name = "custom1"
 wire_api = "responses"
 requires_openai_auth = true
-base_url = "http://192.168.188.245:3001/v1"
+base_url = "http://192.0.2.10:3001/v1"
 [profiles.default]
 model = "gpt-5-mini"
 "#,
@@ -595,7 +595,7 @@ fn apply_pure_api_config_switches_auth_json_and_writes_provider_token() {
 
     let result = apply_pure_api_config_to_home(
         temp.path(),
-        "http://192.168.188.245:3001/v1",
+        "http://192.0.2.10:3001/v1",
         "sk-test-redacted",
     )
     .unwrap();
@@ -615,7 +615,7 @@ fn apply_pure_api_config_switches_auth_json_and_writes_provider_token() {
     assert!(config.contains(r#"name = "custom""#));
     assert!(config.contains(r#"wire_api = "responses""#));
     assert!(config.contains("requires_openai_auth = true"));
-    assert!(config.contains(r#"base_url = "http://192.168.188.245:3001/v1""#));
+    assert!(config.contains(r#"base_url = "http://192.0.2.10:3001/v1""#));
     assert!(config.contains(r#"experimental_bearer_token = "sk-test-redacted""#));
 }
 
@@ -1151,7 +1151,22 @@ experimental_bearer_token = "sk-new"
         std::fs::read_to_string(temp.path().join("model-catalogs").join("relay-a.json")).unwrap();
     assert!(catalog.contains(r#""slug": "deepseek-coder""#));
     assert!(catalog.contains(r#""slug": "qwen3-coder""#));
-    assert!(catalog.contains(r#""effort": "max""#));
+    let catalog: serde_json::Value = serde_json::from_str(&catalog).unwrap();
+    for slug in ["deepseek-coder", "qwen3-coder"] {
+        let model = catalog["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|model| model["slug"] == slug)
+            .unwrap();
+        assert_eq!(model["context_window"], 200_000);
+        assert!(
+            !model["supported_reasoning_levels"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+    }
 }
 
 #[test]
@@ -2844,7 +2859,7 @@ model_provider = "custom"
 name = "custom"
 wire_api = "responses"
 requires_openai_auth = true
-base_url = "http://192.168.188.245:3001/v1"
+base_url = "http://192.0.2.10:3001/v1"
 "#
         .to_string(),
         auth_contents: "{}".to_string(),
@@ -2857,7 +2872,7 @@ base_url = "http://192.168.188.245:3001/v1"
     assert!(config.contains(r#"model = "gpt-5.5""#));
     assert!(config.contains(r#"model_provider = "custom""#));
     assert!(config.contains("[model_providers.custom]"));
-    assert!(config.contains(r#"base_url = "http://192.168.188.245:3001/v1""#));
+    assert!(config.contains(r#"base_url = "http://192.0.2.10:3001/v1""#));
 }
 
 #[test]
@@ -2878,7 +2893,7 @@ model_provider = "custom"
 name = "custom"
 wire_api = "responses"
 requires_openai_auth = true
-base_url = "http://192.168.188.245:3001/v1"
+base_url = "http://192.0.2.10:3001/v1"
 experimental_bearer_token = "sk-provider-token"
 "#
         .to_string(),
@@ -2977,7 +2992,7 @@ model_provider = "custom"
 name = "custom"
 wire_api = "responses"
 requires_openai_auth = true
-base_url = "http://192.168.188.245:3001/v1"
+base_url = "http://192.0.2.10:3001/v1"
 "#;
     let common = r#"model_reasoning_effort = "high"
 
@@ -2997,7 +3012,7 @@ command = "python"
     assert!(stripped.contains(r#"model = "gpt-5.5""#));
     assert!(stripped.contains(r#"model_provider = "custom""#));
     assert!(stripped.contains("[model_providers.custom]"));
-    assert!(stripped.contains(r#"base_url = "http://192.168.188.245:3001/v1""#));
+    assert!(stripped.contains(r#"base_url = "http://192.0.2.10:3001/v1""#));
 }
 
 #[test]

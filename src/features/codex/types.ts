@@ -55,6 +55,11 @@ export type RelayProfile = {
   modelInsertMode?: 'patch' | 'modelCatalog'
   modelList: string
   modelWindows: string
+  modelVlm: string
+  vlmApiKey?: string
+  vlmApiKeySaved?: boolean
+  vlmModel: string
+  vlmBaseUrl: string
   userAgent: string
   reasoningDialect?: ReasoningDialect
 }
@@ -119,6 +124,7 @@ export type BackendSettings = {
   relayContextConfigContents: string
   activeRelayId: string
   hotSwitchEnabled: boolean
+  hotSwitchRequestBodyLimitMib: number
   hotSwitchRelayId: string
   hotSwitchModel: string
   hotSwitchModelRoutingEnabled: boolean

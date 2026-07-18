@@ -325,6 +325,10 @@ desktop.on('message', async (data) => {
               role: 'assistant',
               text: viewOnly ? '历史回复已读取' : projectLoaded ? '按项目读取的历史回复' : '已有回复已读取',
             },
+            ...(!viewOnly && !projectLoaded ? [{
+              role: 'assistant',
+              text: '```text\n### 自动格式化验证\n\n→ 自动读取项目\n→ 继续已有任务\n\n- `model`: 使用本机模型\n- `session`: 保留会话上下文\n\n所以，这是**已经格式化的回复**。\n```',
+            }] : []),
           ],
         }],
       }, command.sessionId))
@@ -371,7 +375,21 @@ desktop.on('message', async (data) => {
       await send(remoteMessage(
         'response.delta',
         null,
-        { delta: '远程附件和 Skill 已验证' },
+        { delta: '### 远程附件和 Skill 已验证\n\n' },
+        command.sessionId,
+        turnId,
+      ))
+      await send(remoteMessage(
+        'response.delta',
+        null,
+        { delta: '- 附件已解密\n- Skill 已加载\n\n' },
+        command.sessionId,
+        turnId,
+      ))
+      await send(remoteMessage(
+        'response.delta',
+        null,
+        { delta: '```text\n测试输出\n```' },
         command.sessionId,
         turnId,
       ))
@@ -394,6 +412,7 @@ const viewOnlyScreenshot = `${screenshotRoot}-view-only.png`
 const projectLoadedScreenshot = `${screenshotRoot}-project-loaded.png`
 const mobileScreenshot = `${screenshotRoot}-mobile.png`
 const desktopScreenshot = `${screenshotRoot}-desktop.png`
+const formattedHistoryScreenshot = `${screenshotRoot}-formatted-history.png`
 
 try {
   await page.goto(`${baseUrl}/?room=${roomId}&desktop=${desktopDeviceId}#token=${token}&key=${key}`)
@@ -433,6 +452,12 @@ try {
   await page.getByText('可继续的远控任务', { exact: true }).click()
   await page.getByText('已有回复已读取', { exact: true }).waitFor()
   await page.getByText('历史已同步 · 可继续', { exact: true }).waitFor()
+  await page.getByRole('heading', { name: '自动格式化验证', exact: true }).waitFor()
+  assert.equal(await page.locator('.message.assistant .arrow-list li').count(), 2)
+  assert.equal(await page.locator('.message.assistant strong', { hasText: '已经格式化的回复' }).count(), 1)
+  assert.equal((await page.locator('#messageList').innerText()).includes('```text'), false)
+  assert.equal(await page.locator('#messageList script').count(), 0)
+  await page.screenshot({ path: formattedHistoryScreenshot, fullPage: false })
   assert.equal(await page.locator('#messageInput').isEnabled(), true)
   assert.deepEqual(resumedSessionIds, [projectLoadedSessionId, authorizedSessionId])
   assert.deepEqual(historySessionIds, [projectLoadedSessionId, viewOnlySessionId, authorizedSessionId])
@@ -456,7 +481,10 @@ try {
   })
   await page.locator('#newSessionPrompt').fill('验证附件上传和所选 Skill')
   await page.locator('#createSessionButton').click()
-  await page.getByText('远程附件和 Skill 已验证', { exact: true }).waitFor({ timeout: 20_000 })
+  await page.getByRole('heading', { name: '远程附件和 Skill 已验证', exact: true }).waitFor({ timeout: 20_000 })
+  assert.equal(await page.locator('.message.assistant li').count(), 2)
+  assert.equal(await page.locator('.message.assistant .markdown-code-block code').textContent(), '测试输出')
+  assert.equal(await page.locator('.message.assistant .markdown-copy').isVisible(), true)
   await page.screenshot({ path: mobileScreenshot, fullPage: false })
   await page.setViewportSize({ width: 980, height: 800 })
   await page.screenshot({ path: desktopScreenshot, fullPage: false })
@@ -470,7 +498,13 @@ try {
     attachment: receivedAttachment,
     projectSessionRequests,
     consoleErrors,
-    screenshots: [projectLoadedScreenshot, viewOnlyScreenshot, mobileScreenshot, desktopScreenshot],
+    screenshots: [
+      projectLoadedScreenshot,
+      viewOnlyScreenshot,
+      formattedHistoryScreenshot,
+      mobileScreenshot,
+      desktopScreenshot,
+    ],
   }, null, 2)}\n`)
 } finally {
   await browser.close()

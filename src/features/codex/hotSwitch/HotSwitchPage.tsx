@@ -87,6 +87,20 @@ export function HotSwitchPage({
               <option value="auto">自动</option><option value="off">关闭</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option>
             </select>
           </CodexField>
+          <CodexField label="请求体上限（MiB）">
+            <input
+              type="number"
+              min={16}
+              max={256}
+              step={16}
+              value={settings.hotSwitchRequestBodyLimitMib}
+              disabled={operationBusy}
+              onChange={(event) => {
+                const value = event.currentTarget.valueAsNumber
+                if (Number.isFinite(value)) onPatchSettings({ hotSwitchRequestBodyLimitMib: value })
+              }}
+            />
+          </CodexField>
           {!settings.hotSwitchAutoModelEnabled ? (
             <CodexField label="模型自动路由">
               <select value={settings.hotSwitchModelRoutingEnabled ? 'on' : 'off'} disabled={operationBusy} onChange={(event) => onPatchSettings({ hotSwitchModelRoutingEnabled: event.target.value === 'on' })}>
@@ -101,6 +115,7 @@ export function HotSwitchPage({
           <p className="codex-result-text">模型自动路由开启后，只接受已保存的模型映射，并以 Codex 窗口内选择的模型为准；未映射模型会直接提示错误，不再使用全局回退目标。</p>
         ) : null}
         {!validation.valid && !enabled ? <p className="codex-result-text">映射规则仍有错误；修正后才能应用并开启自动路由。</p> : null}
+        <p className="codex-result-text">请求体上限默认 64 MiB，可设置 16–256 MiB；保存后对下一次请求立即生效。调高会增加内存、Token 与上游超限风险，不会改变上游站点的限制。</p>
         <p className="codex-result-text">“保存配置”只保存本区设置，不会启动 8787 网关，也不会修改 Codex 当前配置。</p>
         <div className="codex-toolbar">
           <LoadingButton busy={savingSettings} disabled={operationBusy} onClick={onSaveSettings}>

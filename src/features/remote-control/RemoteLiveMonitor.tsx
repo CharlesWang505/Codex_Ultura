@@ -3,8 +3,9 @@ import { listen } from '@tauri-apps/api/event'
 import { Activity, FileCode2, MessageSquare, Smartphone, TerminalSquare } from 'lucide-react'
 import { getRemoteMonitorSnapshot } from './api'
 import type { RemoteMonitorActivity, RemoteMonitorSnapshot } from './types'
+import { useLanguage, type AppLanguage } from '../../lib/i18n'
 
-const statusLabels: Record<string, string> = {
+const statusLabelSources: Record<string, string> = {
   ready: '已连接',
   waiting: '等待响应',
   running: '执行中',
@@ -20,8 +21,8 @@ function activityIcon(activity: RemoteMonitorActivity) {
   return <Activity size={14} />
 }
 
-function formatMonitorTime(value: number) {
-  return new Date(value).toLocaleTimeString('zh-CN', {
+function formatMonitorTime(value: number, language: AppLanguage) {
+  return new Date(value).toLocaleTimeString(language, {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
@@ -30,6 +31,7 @@ function formatMonitorTime(value: number) {
 }
 
 export function RemoteLiveMonitor() {
+  const { language, t } = useLanguage()
   const [snapshot, setSnapshot] = useState<RemoteMonitorSnapshot>({ sequence: 0, sessions: [] })
   const [selectedId, setSelectedId] = useState('')
   const transcriptRef = useRef<HTMLDivElement>(null)
@@ -69,6 +71,8 @@ export function RemoteLiveMonitor() {
   }, [selectedId, snapshot.sessions])
 
   const selected = snapshot.sessions.find((session) => session.sessionId === selectedId)
+  const statusLabel = (status: string) => t(statusLabelSources[status] || status)
+  const sessionTitle = (title: string) => title && title !== '远程会话' ? title : t('远程会话')
 
   useEffect(() => {
     const transcript = transcriptRef.current
@@ -79,18 +83,22 @@ export function RemoteLiveMonitor() {
     <section className="remote-panel remote-monitor">
       <header>
         <Activity size={17} />
-        <h2>远程会话实时监控</h2>
-        <span className="remote-monitor-count">{snapshot.sessions.length} 个最近会话</span>
+        <h2>{t('远程会话实时监控')}</h2>
+        <span className="remote-monitor-count">
+          {language === 'en-US'
+            ? `${snapshot.sessions.length} recent sessions`
+            : `${snapshot.sessions.length} 个最近会话`}
+        </span>
       </header>
       {snapshot.sessions.length === 0 ? (
         <div className="remote-monitor-empty">
           <Smartphone size={28} />
-          <strong>等待手机发起任务</strong>
-          <span>手机输入、Codex 流式回复、命令和文件事件会实时显示在这里。</span>
+          <strong>{t('等待手机发起任务')}</strong>
+          <span>{t('手机输入、Codex 流式回复、命令和文件事件会实时显示在这里。')}</span>
         </div>
       ) : (
         <div className="remote-monitor-layout">
-          <nav className="remote-monitor-sessions" aria-label="远程会话">
+          <nav className="remote-monitor-sessions" aria-label={t('远程会话')}>
             {snapshot.sessions.map((session) => (
               <button
                 className={session.sessionId === selectedId ? 'active' : ''}
@@ -100,10 +108,10 @@ export function RemoteLiveMonitor() {
               >
                 <span className={`remote-monitor-state state-${session.status}`} aria-hidden="true" />
                 <span>
-                  <strong>{session.title || '远程会话'}</strong>
-                  <small>{session.workspace} · {formatMonitorTime(session.updatedAt)}</small>
+                  <strong>{sessionTitle(session.title)}</strong>
+                  <small>{session.workspace} · {formatMonitorTime(session.updatedAt, language)}</small>
                 </span>
-                <em>{statusLabels[session.status] || session.status}</em>
+                <em>{statusLabel(session.status)}</em>
               </button>
             ))}
           </nav>
@@ -112,11 +120,14 @@ export function RemoteLiveMonitor() {
             <div className="remote-monitor-detail">
               <div className="remote-monitor-detail-head">
                 <div>
-                  <strong>{selected.title || '远程会话'}</strong>
-                  <span>{selected.workspace} · 手机 {selected.remoteDeviceId.slice(0, 8)}</span>
+                  <strong>{sessionTitle(selected.title)}</strong>
+                  <span>
+                    {selected.workspace} · {language === 'en-US' ? 'Mobile' : '手机'}{' '}
+                    {selected.remoteDeviceId.slice(0, 8)}
+                  </span>
                 </div>
                 <span className={`remote-monitor-status status-${selected.status}`}>
-                  {statusLabels[selected.status] || selected.status}
+                  {statusLabel(selected.status)}
                 </span>
               </div>
 
@@ -124,13 +135,13 @@ export function RemoteLiveMonitor() {
                 {selected.messages.length === 0 ? (
                   <div className="remote-monitor-placeholder">
                     <MessageSquare size={20} />
-                    会话已连接，等待消息内容。
+                    {t('会话已连接，等待消息内容。')}
                   </div>
                 ) : selected.messages.map((message) => (
                   <article className={`remote-monitor-message ${message.role}`} key={message.id}>
                     <header>
-                      <strong>{message.role === 'user' ? '手机' : message.role === 'assistant' ? 'Codex' : '工具'}</strong>
-                      <time>{formatMonitorTime(message.timestamp)}</time>
+                      <strong>{message.role === 'user' ? t('手机') : message.role === 'assistant' ? 'Codex' : t('工具')}</strong>
+                      <time>{formatMonitorTime(message.timestamp, language)}</time>
                     </header>
                     <pre>{message.text}</pre>
                   </article>
@@ -141,8 +152,8 @@ export function RemoteLiveMonitor() {
                 {selected.activities.slice(-6).map((activity) => (
                   <div key={activity.id}>
                     {activityIcon(activity)}
-                    <span>{activity.summary}</span>
-                    <time>{formatMonitorTime(activity.timestamp)}</time>
+                    <span>{t(activity.summary)}</span>
+                    <time>{formatMonitorTime(activity.timestamp, language)}</time>
                   </div>
                 ))}
               </div>

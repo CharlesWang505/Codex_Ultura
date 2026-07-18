@@ -304,6 +304,7 @@ pub enum UpstreamWireApi {
     ChatCompletions,
     Anthropic,
     Gemini,
+    AudioTranscriptions,
 }
 
 impl UpstreamProxyResponse {
@@ -486,6 +487,17 @@ pub fn is_models_proxy_path(path: &str) -> bool {
     )
 }
 
+pub fn is_audio_transcriptions_proxy_path(path: &str) -> bool {
+    let path = path.split_once('?').map_or(path, |(path, _)| path);
+    matches!(
+        path,
+        "/audio/transcriptions"
+            | "/v1/audio/transcriptions"
+            | "/v1/v1/audio/transcriptions"
+            | "/codex/v1/audio/transcriptions"
+    )
+}
+
 pub async fn open_responses_proxy_request(
     body: &str,
     original_user_agent: Option<&str>,
@@ -536,7 +548,7 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
     for (attempt, relay) in relays.into_iter().enumerate() {
         validate_upstream(&relay)?;
         let (endpoint, upstream_body, wire_api) =
-            upstream_request_parts(&relay, request_json.clone())?;
+            upstream_request_parts(&relay, request_json.clone()).await?;
         let has_more_candidates = attempt + 1 < relay_count;
         let header_timeout = response_header_timeout(is_stream);
         let _ = crate::diagnostic_log::append_diagnostic_log(
@@ -704,6 +716,58 @@ pub async fn open_models_proxy_request(
     })
 }
 
+pub async fn open_audio_transcriptions_proxy_request(
+    body: &[u8],
+    content_type: &str,
+    original_user_agent: Option<&str>,
+) -> anyhow::Result<UpstreamProxyResponse> {
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    let relay = crate::relay_rotation::select_relay_for_probe(&settings)?;
+    validate_upstream(&relay)?;
+    let content_type = content_type.trim();
+    if content_type.is_empty() {
+        anyhow::bail!("Audio transcriptions 请求缺少 Content-Type");
+    }
+
+    let endpoint = audio_transcriptions_url(&relay.base_url);
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "protocol_proxy.audio_transcriptions_request",
+        json!({
+            "relayId": relay.id,
+            "relayName": relay.name,
+            "endpoint": endpoint,
+            "wireApi": UpstreamWireApi::AudioTranscriptions,
+            "bodyBytes": body.len()
+        }),
+    );
+    let upstream = send_upstream_request(
+        crate::http_client::proxied_client(&effective_user_agent(
+            &relay.user_agent,
+            original_user_agent,
+        ))?
+        .post(endpoint)
+        .bearer_auth(relay.api_key.trim())
+        .header(reqwest::header::CONTENT_TYPE, content_type)
+        .body(body.to_vec()),
+    )
+    .await?;
+    let status_code = upstream.status().as_u16();
+    let content_type = upstream
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("application/json; charset=utf-8")
+        .to_string();
+
+    Ok(UpstreamProxyResponse {
+        status_code,
+        is_stream: false,
+        content_type,
+        wire_api: UpstreamWireApi::AudioTranscriptions,
+        response: upstream,
+    })
+}
+
 pub async fn open_chat_completions_proxy_request(
     body: &str,
     original_user_agent: Option<&str>,
@@ -727,6 +791,7 @@ pub async fn open_chat_completions_proxy_request(
     if relay.api_key.trim().is_empty() {
         anyhow::bail!("Chat Completions 上游 Key 不能为空");
     }
+    crate::vision::process_request_images(&mut request_json, &relay).await;
 
     let is_stream = request_json
         .get("stream")
@@ -802,10 +867,11 @@ fn request_model(body: &Value) -> String {
         .to_string()
 }
 
-fn upstream_request_parts(
+async fn upstream_request_parts(
     relay: &crate::settings::RelayProfile,
-    request_json: Value,
+    mut request_json: Value,
 ) -> anyhow::Result<(String, Value, UpstreamWireApi)> {
+    crate::vision::process_request_images(&mut request_json, relay).await;
     match relay.protocol {
         RelayProtocol::Responses => Ok((
             responses_url(&relay.base_url),
@@ -1138,6 +1204,7 @@ pub fn upstream_json_to_response(
             gemini_to_chat_completion(payload, request_model(original_request)),
             original_request,
         ),
+        UpstreamWireApi::AudioTranscriptions => Ok(payload),
     }
 }
 
@@ -1675,6 +1742,26 @@ pub fn responses_url(base_url: &str) -> String {
         format!("{base}/responses")
     } else {
         format!("{base}/v1/responses")
+    };
+    while url.contains("/v1/v1") {
+        url = url.replace("/v1/v1", "/v1");
+    }
+    url
+}
+
+pub fn audio_transcriptions_url(base_url: &str) -> String {
+    let skip_version_prefix = base_url.trim().ends_with('#');
+    let base = base_url.trim().trim_end_matches('#').trim_end_matches('/');
+    if base.to_ascii_lowercase().ends_with("/audio/transcriptions") {
+        return base.to_string();
+    }
+    let origin_only = base
+        .split_once("://")
+        .map_or(!base.contains('/'), |(_, rest)| !rest.contains('/'));
+    let mut url = if skip_version_prefix || has_version_suffix(base) || !origin_only {
+        format!("{base}/audio/transcriptions")
+    } else {
+        format!("{base}/v1/audio/transcriptions")
     };
     while url.contains("/v1/v1") {
         url = url.replace("/v1/v1", "/v1");
@@ -4923,5 +5010,43 @@ mod hot_switch_tests {
         assert!(item_done < completed);
         assert!(sse.contains(r#""delta":"测试成功""#));
         assert!(sse.ends_with("data: [DONE]\n\n"));
+    }
+
+    #[tokio::test]
+    async fn strip_image_policy_survives_all_protocol_conversions() {
+        let request = || {
+            json!({
+                "model": "upstream-vision",
+                "input": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "describe"},
+                        {"type": "input_image", "image_url": "https://example.test/image.png"}
+                    ]
+                }]
+            })
+        };
+
+        for protocol in [
+            RelayProtocol::Responses,
+            RelayProtocol::ChatCompletions,
+            RelayProtocol::Anthropic,
+            RelayProtocol::Gemini,
+        ] {
+            let relay = RelayProfile {
+                protocol,
+                model_vlm: r#"{"upstream-vision":"strip"}"#.to_string(),
+                base_url: "https://relay.example/v1".to_string(),
+                api_key: "sk-test".to_string(),
+                ..RelayProfile::default()
+            };
+            let (_, converted, _) = upstream_request_parts(&relay, request()).await.unwrap();
+            let text = serde_json::to_string(&converted).unwrap();
+            assert!(
+                text.contains("[图片已省略]"),
+                "protocol {protocol:?}: {text}"
+            );
+            assert!(!text.contains("image.png"), "protocol {protocol:?}: {text}");
+        }
     }
 }

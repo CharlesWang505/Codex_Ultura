@@ -32,6 +32,8 @@ async fn bridge_routes_cover_all_current_paths() {
         ("/devtools/open", json!({})),
         ("/manager/open", json!({})),
         ("/backend/status", json!({})),
+        ("/api-mode/status", json!({})),
+        ("/api-mode/logout", json!({})),
         ("/codex-model-catalog", json!({})),
         ("/codex-config-model", json!({})),
         ("/upstream-worktree/status", json!({})),
@@ -524,6 +526,42 @@ async fn user_script_manager_scans_and_persists_inventory_shape() {
     );
 }
 
+#[test]
+fn user_script_bundle_cleans_disabled_and_removed_runtime_entries() {
+    let temp = tempfile::tempdir().unwrap();
+    let user_dir = temp.path().join("user");
+    std::fs::create_dir_all(&user_dir).unwrap();
+    std::fs::write(user_dir.join("a.js"), "window.a = true;").unwrap();
+    let manager = UserScriptManager::new(
+        temp.path().join("builtin"),
+        user_dir,
+        temp.path().join("user_scripts.json"),
+    );
+
+    let enabled = manager.build_enabled_bundle().unwrap();
+    assert!(enabled.contains("window.a = true;"));
+    assert!(enabled.contains("registry.cleanupEntry"));
+    assert!(enabled.contains("registry.installPerformanceGuard"));
+    assert!(enabled.contains("tux-toolbar-buddy"));
+    assert!(enabled.contains("nodeTouchesToolbar"));
+    assert!(enabled.contains("new Set([\"user:a.js\"])"));
+    assert!(enabled.contains("__codexTokenUsage?.destroy?.()"));
+
+    manager.set_script_enabled("user:a.js", false).unwrap();
+    let script_disabled = manager.build_enabled_bundle().unwrap();
+    assert!(!script_disabled.trim().is_empty());
+    assert!(!script_disabled.contains("window.a = true;"));
+    assert!(script_disabled.contains("new Set([])"));
+    assert!(script_disabled.contains("\"disabled-or-removed\""));
+
+    manager.set_script_enabled("user:a.js", true).unwrap();
+    manager.set_global_enabled(false).unwrap();
+    let globally_disabled = manager.build_enabled_bundle().unwrap();
+    assert!(!globally_disabled.trim().is_empty());
+    assert!(!globally_disabled.contains("window.a = true;"));
+    assert!(globally_disabled.contains("new Set([])"));
+}
+
 #[tokio::test]
 async fn user_script_manager_deletes_market_script_metadata_and_rejects_builtin_delete() {
     let temp = tempfile::tempdir().unwrap();
@@ -620,6 +658,7 @@ async fn core_runtime_reload_evaluates_enabled_user_bundle_and_status_is_ok() {
     assert!(evaluated[0].contains("window.demo = true;"));
     assert!(evaluated[0].contains("previous.fingerprint === fingerprint"));
     assert!(evaluated[0].contains("typeof previous.cleanup === \"function\""));
+    assert!(evaluated[0].contains("registry.cleanupEntry"));
 }
 
 #[tokio::test]
@@ -841,7 +880,11 @@ fn install_market_script_rejects_checksum_mismatch_and_preserves_existing_file()
         codex_plus_core::script_market::install_market_script_content(&manager, &script, b"new")
             .unwrap_err();
 
-    assert!(error.to_string().contains("sha256 mismatch"));
+    assert!(
+        error
+            .to_string()
+            .contains("市场脚本完整性校验失败")
+    );
     assert_eq!(
         std::fs::read_to_string(user_dir.join("market-demo.js")).unwrap(),
         "old"

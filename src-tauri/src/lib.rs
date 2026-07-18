@@ -7,14 +7,9 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tauri::webview::PageLoadEvent;
-#[cfg(target_os = "windows")]
-use tauri::window::Color;
-#[cfg(target_os = "macos")]
-use tauri::window::EffectState;
-#[cfg(any(target_os = "windows", target_os = "macos"))]
-use tauri::window::{Effect, EffectsBuilder};
 use tauri::{AppHandle, Manager};
 
 mod app_preferences;
@@ -51,6 +46,20 @@ struct RequestResult {
     duration_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     headers: Option<HashMap<String, String>>,
+}
+
+static RELAY_HTTP_CLIENT: OnceLock<Result<Client, String>> = OnceLock::new();
+
+fn relay_http_client() -> Result<&'static Client, String> {
+    match RELAY_HTTP_CLIENT.get_or_init(|| {
+        Client::builder()
+            .redirect(Policy::limited(10))
+            .build()
+            .map_err(|error| error.to_string())
+    }) {
+        Ok(client) => Ok(client),
+        Err(error) => Err(error.clone()),
+    }
 }
 
 fn elapsed_ms(started_at: Instant) -> u64 {
@@ -97,13 +106,9 @@ fn collect_response_headers(headers: &HeaderMap) -> HashMap<String, String> {
 async fn relay_request(input: RequestInput) -> RequestResult {
     let started_at = Instant::now();
     let timeout = Duration::from_millis(input.timeout_ms.unwrap_or(12_000).max(1));
-    let client = match Client::builder()
-        .redirect(Policy::limited(10))
-        .timeout(timeout)
-        .build()
-    {
+    let client = match relay_http_client() {
         Ok(client) => client,
-        Err(error) => return request_error(started_at, error.to_string()),
+        Err(error) => return request_error(started_at, error),
     };
 
     let method = input
@@ -132,7 +137,10 @@ async fn relay_request(input: RequestInput) -> RequestResult {
         }
     }
 
-    let mut request = client.request(method, &input.url).headers(headers);
+    let mut request = client
+        .request(method, &input.url)
+        .headers(headers)
+        .timeout(timeout);
     if let Some(body) = input.body {
         request = request.json(&body);
     }
@@ -252,27 +260,6 @@ pub fn run() {
                 setup_hidden_watcher(app.handle().clone())?;
             }
 
-            let window = app
-                .get_webview_window("main")
-                .ok_or_else(|| std::io::Error::other("main window was not created"))?;
-
-            #[cfg(target_os = "windows")]
-            window.set_effects(
-                EffectsBuilder::new()
-                    .effect(Effect::Acrylic)
-                    .color(Color(8, 12, 18, 150))
-                    .build(),
-            )?;
-
-            #[cfg(target_os = "macos")]
-            window.set_effects(
-                EffectsBuilder::new()
-                    .effect(Effect::Sidebar)
-                    .state(EffectState::Active)
-                    .radius(8.0)
-                    .build(),
-            )?;
-
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -309,6 +296,9 @@ pub fn run() {
             remote_control::remote_control_cancel_lan_pairing,
             remote_control::remote_control_approve_lan_pairing,
             remote_control::remote_control_reject_lan_pairing,
+            remote_control::remote_control_invite_relay_mobile,
+            remote_control::remote_control_reject_relay_pairing,
+            remote_control::remote_control_refresh_relay_mobiles,
             remote_control::remote_control_add_workspace,
             remote_control::remote_control_remove_workspace,
             remote_control::remote_control_update_workspace_permissions,
@@ -361,6 +351,12 @@ pub fn run() {
             codex_plus_manager_lib::commands::load_user_script_runtime,
             codex_plus_manager_lib::commands::reload_user_scripts,
             codex_plus_manager_lib::commands::delete_user_script,
+            codex_plus_manager_lib::commands::load_codex_theme_studio,
+            codex_plus_manager_lib::commands::save_codex_theme_studio,
+            codex_plus_manager_lib::commands::reload_codex_theme_studio,
+            codex_plus_manager_lib::commands::reset_codex_theme_studio,
+            codex_plus_manager_lib::commands::import_codex_theme_package,
+            codex_plus_manager_lib::commands::delete_codex_theme,
             codex_plus_manager_lib::commands::open_external_url,
             codex_plus_manager_lib::commands::install_entrypoints,
             codex_plus_manager_lib::commands::uninstall_entrypoints,
@@ -414,7 +410,7 @@ pub fn run() {
                         .state::<remote_control::RemoteControlManager>()
                         .inner()
                         .clone();
-                    tauri::async_runtime::block_on(manager.stop());
+                    tauri::async_runtime::block_on(manager.shutdown_and_disable());
                 }
                 proxy_latency::shutdown_managed_mihomo();
                 if watcher_hidden {

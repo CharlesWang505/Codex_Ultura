@@ -6,6 +6,7 @@ mod manager;
 mod monitor;
 mod protocol;
 mod relay_client;
+mod relay_pairing;
 mod sessions;
 mod settings;
 mod workspace;
@@ -133,6 +134,32 @@ pub async fn remote_control_reject_lan_pairing(
     request_id: String,
 ) -> Result<RemoteControlSnapshot, String> {
     manager.reject_lan_pairing(&request_id).await?;
+    manager.snapshot().await
+}
+
+#[tauri::command]
+pub async fn remote_control_invite_relay_mobile(
+    manager: State<'_, RemoteControlManager>,
+    device_id: String,
+) -> Result<relay_pairing::RelayPairingInvitation, String> {
+    manager.invite_relay_mobile(&device_id).await
+}
+
+#[tauri::command]
+pub async fn remote_control_reject_relay_pairing(
+    manager: State<'_, RemoteControlManager>,
+    pairing_id: String,
+) -> Result<RemoteControlSnapshot, String> {
+    manager.reject_relay_pairing(&pairing_id).await?;
+    manager.snapshot().await
+}
+
+#[tauri::command]
+pub async fn remote_control_refresh_relay_mobiles(
+    manager: State<'_, RemoteControlManager>,
+) -> Result<RemoteControlSnapshot, String> {
+    manager.refresh_relay_mobiles().await?;
+    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
     manager.snapshot().await
 }
 

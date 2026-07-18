@@ -88,6 +88,16 @@ pub struct RelayProfile {
         skip_serializing_if = "String::is_empty"
     )]
     pub model_windows: String,
+    #[serde(rename = "modelVlm", default, skip_serializing_if = "String::is_empty")]
+    pub model_vlm: String,
+    #[serde(rename = "vlmApiKey", default, skip_serializing)]
+    pub vlm_api_key: String,
+    #[serde(rename = "vlmApiKeySaved", default)]
+    pub vlm_api_key_saved: bool,
+    #[serde(rename = "vlmModel", default)]
+    pub vlm_model: String,
+    #[serde(rename = "vlmBaseUrl", default)]
+    pub vlm_base_url: String,
     #[serde(
         rename = "userAgent",
         default,
@@ -186,6 +196,11 @@ impl Default for RelayProfile {
             model_insert_mode: RelayModelInsertMode::Patch,
             model_list: String::new(),
             model_windows: String::new(),
+            model_vlm: String::new(),
+            vlm_api_key: String::new(),
+            vlm_api_key_saved: false,
+            vlm_model: String::new(),
+            vlm_base_url: String::new(),
             user_agent: String::new(),
             reasoning_dialect: ReasoningDialect::Inherit,
         }
@@ -346,6 +361,12 @@ pub struct BackendSettings {
     pub active_relay_id: String,
     #[serde(rename = "hotSwitchEnabled", default)]
     pub hot_switch_enabled: bool,
+    #[serde(
+        rename = "hotSwitchRequestBodyLimitMib",
+        default = "default_hot_switch_request_body_limit_mib",
+        deserialize_with = "deserialize_hot_switch_request_body_limit_mib"
+    )]
+    pub hot_switch_request_body_limit_mib: u16,
     #[serde(rename = "hotSwitchRelayId", default = "default_active_relay_id")]
     pub hot_switch_relay_id: String,
     #[serde(rename = "hotSwitchModel", default)]
@@ -421,6 +442,7 @@ impl Default for BackendSettings {
             relay_context_config_contents: String::new(),
             active_relay_id: default_active_relay_id(),
             hot_switch_enabled: false,
+            hot_switch_request_body_limit_mib: default_hot_switch_request_body_limit_mib(),
             hot_switch_relay_id: default_active_relay_id(),
             hot_switch_model: String::new(),
             hot_switch_model_routing_enabled: false,
@@ -472,6 +494,11 @@ impl BackendSettings {
                 model_insert_mode: RelayModelInsertMode::Patch,
                 model_list: String::new(),
                 model_windows: String::new(),
+                model_vlm: String::new(),
+                vlm_api_key: String::new(),
+                vlm_api_key_saved: false,
+                vlm_model: String::new(),
+                vlm_base_url: String::new(),
                 user_agent: String::new(),
                 reasoning_dialect: ReasoningDialect::Inherit,
             };
@@ -518,6 +545,11 @@ impl BackendSettings {
             model_insert_mode: RelayModelInsertMode::Patch,
             model_list: String::new(),
             model_windows: String::new(),
+            model_vlm: String::new(),
+            vlm_api_key: String::new(),
+            vlm_api_key_saved: false,
+            vlm_model: String::new(),
+            vlm_base_url: String::new(),
             user_agent: String::new(),
             reasoning_dialect: ReasoningDialect::Inherit,
         }
@@ -607,6 +639,20 @@ pub fn default_stepwise_max_output_tokens() -> u32 {
 
 pub fn default_stepwise_timeout_ms() -> u64 {
     8000
+}
+
+pub const MIN_HOT_SWITCH_REQUEST_BODY_LIMIT_MIB: u16 = 16;
+pub const MAX_HOT_SWITCH_REQUEST_BODY_LIMIT_MIB: u16 = 256;
+
+pub fn default_hot_switch_request_body_limit_mib() -> u16 {
+    64
+}
+
+pub fn clamp_hot_switch_request_body_limit_mib(value: u16) -> u16 {
+    value.clamp(
+        MIN_HOT_SWITCH_REQUEST_BODY_LIMIT_MIB,
+        MAX_HOT_SWITCH_REQUEST_BODY_LIMIT_MIB,
+    )
 }
 
 fn default_image_overlay_opacity() -> u8 {
@@ -736,6 +782,15 @@ where
         .unwrap_or_else(default_stepwise_timeout_ms))
 }
 
+fn deserialize_hot_switch_request_body_limit_mib<'de, D>(deserializer: D) -> Result<u16, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<u16>::deserialize(deserializer)?
+        .map(clamp_hot_switch_request_body_limit_mib)
+        .unwrap_or_else(default_hot_switch_request_body_limit_mib))
+}
+
 fn deserialize_profile_api_key<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -781,7 +836,9 @@ impl SettingsStore {
 
         let settings = serde_json::from_str(&contents)
             .with_context(|| format!("failed to parse settings {}", self.path.display()))?;
-        Ok(normalize_settings_config_sections(settings))
+        let mut settings = normalize_settings_config_sections(settings);
+        crate::vlm_secrets::hydrate_profiles(&self.path, &mut settings.relay_profiles)?;
+        Ok(settings)
     }
 
     pub fn save(&self, settings: &BackendSettings) -> anyhow::Result<()> {
@@ -790,6 +847,7 @@ impl SettingsStore {
             .map_err(|_| anyhow::anyhow!("settings write lock poisoned"))?;
         let mut settings = normalize_settings_config_sections(settings.clone());
         settings.codex_extra_args = normalize_codex_extra_args(&settings.codex_extra_args);
+        crate::vlm_secrets::save_profiles(&self.path, &settings.relay_profiles)?;
         let mut raw = self.load_raw_object()?;
         // Preserve top-level fields written by a newer compatible build while
         // replacing every field understood by this build with normalized data.
@@ -810,12 +868,21 @@ impl SettingsStore {
             .lock()
             .map_err(|_| anyhow::anyhow!("settings write lock poisoned"))?;
 
+        let incoming_profiles = payload
+            .get("relayProfiles")
+            .and_then(Value::as_array)
+            .and_then(|profiles| {
+                serde_json::from_value::<Vec<RelayProfile>>(Value::Array(profiles.clone())).ok()
+            });
         let mut raw = self.load_raw_object()?;
         merge_known_setting_fields(&mut raw, &payload);
-        let settings = normalize_settings_config_sections(
+        let mut settings = normalize_settings_config_sections(
             serde_json::from_value(Value::Object(raw.clone()))
                 .with_context(|| format!("failed to decode settings {}", self.path.display()))?,
         );
+        if let Some(profiles) = incoming_profiles.as_deref() {
+            crate::vlm_secrets::save_profiles(&self.path, profiles)?;
+        }
         raw.insert(
             "relayCommonConfigContents".to_string(),
             Value::String(settings.relay_common_config_contents.clone()),
@@ -827,6 +894,7 @@ impl SettingsStore {
         let bytes = serde_json::to_vec_pretty(&Value::Object(raw))?;
         backup_existing_settings_once(&self.path)?;
         atomic_write(&self.path, &bytes)?;
+        crate::vlm_secrets::hydrate_profiles(&self.path, &mut settings.relay_profiles)?;
         Ok(settings)
     }
 
@@ -947,6 +1015,18 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
     merge_bool_setting(target, source, "codexAppServiceTierControls");
     merge_bool_setting(target, source, "codexAppStepwiseEnabled");
     merge_bool_setting(target, source, "codexAppStepwiseDirectSend");
+    if let Some(value) = source
+        .get("hotSwitchRequestBodyLimitMib")
+        .and_then(Value::as_u64)
+        .and_then(|value| u16::try_from(value).ok())
+    {
+        target.insert(
+            "hotSwitchRequestBodyLimitMib".to_string(),
+            Value::Number(serde_json::Number::from(
+                clamp_hot_switch_request_body_limit_mib(value),
+            )),
+        );
+    }
     if let Some(value) = source
         .get("codexAppStepwiseBaseUrl")
         .and_then(Value::as_str)
@@ -1278,6 +1358,15 @@ fn normalize_settings_config_sections(mut settings: BackendSettings) -> BackendS
     settings.relay_context_config_contents = crate::relay_config::normalize_config_text(&context);
     for profile in &mut settings.relay_profiles {
         let _ = crate::relay_config::normalize_relay_profile_for_storage(profile);
+        profile.model_vlm = normalize_model_vlm(&profile.model_vlm);
+        profile.vlm_api_key = profile.vlm_api_key.trim().to_string();
+        profile.vlm_api_key_saved = profile.vlm_api_key_saved || !profile.vlm_api_key.is_empty();
+        profile.vlm_model = profile.vlm_model.trim().to_string();
+        profile.vlm_base_url = profile
+            .vlm_base_url
+            .trim()
+            .trim_end_matches('/')
+            .to_string();
     }
     settings.codex_app_image_overlay_opacity =
         clamp_image_overlay_opacity(settings.codex_app_image_overlay_opacity);
@@ -1304,6 +1393,8 @@ fn normalize_settings_config_sections(mut settings: BackendSettings) -> BackendS
         clamp_stepwise_max_output_tokens(settings.codex_app_stepwise_max_output_tokens);
     settings.codex_app_stepwise_timeout_ms =
         clamp_stepwise_timeout_ms(settings.codex_app_stepwise_timeout_ms);
+    settings.hot_switch_request_body_limit_mib =
+        clamp_hot_switch_request_body_limit_mib(settings.hot_switch_request_body_limit_mib);
     settings.hot_switch_relay_id = settings.hot_switch_relay_id.trim().to_string();
     settings.hot_switch_model = settings.hot_switch_model.trim().to_string();
     if settings.hot_switch_relay_id.is_empty()
@@ -1316,6 +1407,29 @@ fn normalize_settings_config_sections(mut settings: BackendSettings) -> BackendS
     }
     normalize_hot_switch_model_mappings(&mut settings);
     settings
+}
+
+fn normalize_model_vlm(value: &str) -> String {
+    let Ok(map) = serde_json::from_str::<std::collections::BTreeMap<String, String>>(value) else {
+        return String::new();
+    };
+    let normalized = map
+        .into_iter()
+        .filter_map(|(model, mode)| {
+            let model = model.trim().to_string();
+            let mode = mode.trim().to_ascii_lowercase();
+            if model.is_empty() || !matches!(mode.as_str(), "strip" | "vlm") {
+                None
+            } else {
+                Some((model, mode))
+            }
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    if normalized.is_empty() {
+        String::new()
+    } else {
+        serde_json::to_string(&normalized).unwrap_or_default()
+    }
 }
 
 fn normalize_hot_switch_model_mappings(settings: &mut BackendSettings) {
@@ -1497,6 +1611,37 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn hot_switch_request_body_limit_defaults_and_clamps() {
+        let defaults: BackendSettings = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(
+            defaults.hot_switch_request_body_limit_mib,
+            default_hot_switch_request_body_limit_mib()
+        );
+
+        let low: BackendSettings =
+            serde_json::from_value(json!({ "hotSwitchRequestBodyLimitMib": 1 })).unwrap();
+        assert_eq!(
+            low.hot_switch_request_body_limit_mib,
+            MIN_HOT_SWITCH_REQUEST_BODY_LIMIT_MIB
+        );
+
+        let high: BackendSettings =
+            serde_json::from_value(json!({ "hotSwitchRequestBodyLimitMib": 999 })).unwrap();
+        assert_eq!(
+            high.hot_switch_request_body_limit_mib,
+            MAX_HOT_SWITCH_REQUEST_BODY_LIMIT_MIB
+        );
+
+        let dir = temp_dir();
+        let store = SettingsStore::new(dir.join("settings.json"));
+        let mut saved = BackendSettings::default();
+        saved.hot_switch_request_body_limit_mib = 192;
+        store.save(&saved).unwrap();
+        assert_eq!(store.load().unwrap().hot_switch_request_body_limit_mib, 192);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     fn temp_dir() -> std::path::PathBuf {
         let path = std::env::temp_dir().join(format!(
@@ -2686,6 +2831,71 @@ experimental_bearer_token = "sk-existing""#
         assert_eq!(
             saved["hotSwitchModelMappings"][0]["model"],
             json!("codex-model")
+        );
+    }
+
+    #[test]
+    fn relay_profile_always_serializes_vlm_endpoint_fields() {
+        let profile = serde_json::to_value(RelayProfile::default()).unwrap();
+
+        assert_eq!(profile["vlmModel"], json!(""));
+        assert_eq!(profile["vlmBaseUrl"], json!(""));
+        assert!(profile.get("vlmApiKey").is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn settings_store_encrypts_and_restores_vlm_api_keys() {
+        let dir = temp_dir();
+        let path = dir.join("settings.json");
+        let store = SettingsStore::new(path.clone());
+        let key = "vlm-secret-that-must-not-be-plaintext";
+        let mut settings = BackendSettings {
+            relay_profiles: vec![RelayProfile {
+                id: "relay-vlm".to_string(),
+                name: "VLM Relay".to_string(),
+                model_vlm: r#"{"gpt-vision":"vlm"}"#.to_string(),
+                vlm_api_key: key.to_string(),
+                vlm_api_key_saved: true,
+                vlm_model: "vision-model".to_string(),
+                vlm_base_url: "https://vision.example/v1/".to_string(),
+                ..RelayProfile::default()
+            }],
+            active_relay_id: "relay-vlm".to_string(),
+            ..BackendSettings::default()
+        };
+
+        store.save(&settings).unwrap();
+        let settings_text = std::fs::read_to_string(&path).unwrap();
+        let settings_json: Value = serde_json::from_str(&settings_text).unwrap();
+        let vault_path = crate::vlm_secrets::vault_path(&path);
+        let vault_bytes = std::fs::read(&vault_path).unwrap();
+        let loaded = store.load().unwrap();
+
+        assert!(settings_json["relayProfiles"][0].get("vlmApiKey").is_none());
+        assert!(!settings_text.contains(key));
+        assert!(
+            !vault_bytes
+                .windows(key.len())
+                .any(|window| window == key.as_bytes())
+        );
+        assert_eq!(loaded.relay_profiles[0].vlm_api_key, key);
+        assert!(loaded.relay_profiles[0].vlm_api_key_saved);
+        assert_eq!(
+            loaded.relay_profiles[0].vlm_base_url,
+            "https://vision.example/v1"
+        );
+
+        settings = loaded;
+        settings.relay_profiles[0].vlm_api_key.clear();
+        settings.relay_profiles[0].vlm_api_key_saved = false;
+        store.save(&settings).unwrap();
+
+        assert!(!vault_path.exists());
+        assert!(
+            store.load().unwrap().relay_profiles[0]
+                .vlm_api_key
+                .is_empty()
         );
     }
 }

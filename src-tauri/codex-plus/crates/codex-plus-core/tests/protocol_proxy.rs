@@ -1,9 +1,9 @@
 use codex_plus_core::protocol_proxy::{
-    ChatSseToResponsesConverter, chat_completion_to_response,
+    ChatSseToResponsesConverter, audio_transcriptions_url, chat_completion_to_response,
     chat_completion_to_response_with_request, chat_completions_url, chat_sse_to_responses_sse,
-    chat_sse_to_responses_sse_with_request, is_chat_completions_proxy_path, is_models_proxy_path,
-    is_responses_proxy_path, models_url, open_chat_completions_proxy_request,
-    open_models_proxy_request, open_responses_proxy_request,
+    chat_sse_to_responses_sse_with_request, is_audio_transcriptions_proxy_path,
+    is_chat_completions_proxy_path, is_models_proxy_path, is_responses_proxy_path, models_url,
+    open_chat_completions_proxy_request, open_models_proxy_request, open_responses_proxy_request,
     open_responses_proxy_request_with_settings, responses_error_from_upstream,
     responses_to_chat_completions, send_upstream_request_with_header_timeout,
     upstream_header_timeout, upstream_http_client, upstream_stream_header_timeout,
@@ -132,6 +132,15 @@ fn proxy_route_matchers_accept_ccswitch_codex_aliases() {
 
     for path in ["/models", "/v1/models", "/v1/v1/models", "/codex/v1/models"] {
         assert!(is_models_proxy_path(path), "{path}");
+    }
+
+    for path in [
+        "/audio/transcriptions",
+        "/v1/audio/transcriptions",
+        "/v1/v1/audio/transcriptions",
+        "/codex/v1/audio/transcriptions",
+    ] {
+        assert!(is_audio_transcriptions_proxy_path(path), "{path}");
     }
 }
 
@@ -1296,6 +1305,30 @@ fn models_url_normalizes_common_base_urls() {
     assert_eq!(
         models_url("https://api.example.test/openai#"),
         "https://api.example.test/openai/models"
+    );
+}
+
+#[test]
+fn audio_transcriptions_url_normalizes_common_base_urls() {
+    assert_eq!(
+        audio_transcriptions_url("https://api.example.test"),
+        "https://api.example.test/v1/audio/transcriptions"
+    );
+    assert_eq!(
+        audio_transcriptions_url("https://api.example.test/v1"),
+        "https://api.example.test/v1/audio/transcriptions"
+    );
+    assert_eq!(
+        audio_transcriptions_url("https://api.example.test/openai"),
+        "https://api.example.test/openai/audio/transcriptions"
+    );
+    assert_eq!(
+        audio_transcriptions_url("https://api.example.test/v1/audio/transcriptions"),
+        "https://api.example.test/v1/audio/transcriptions"
+    );
+    assert_eq!(
+        audio_transcriptions_url("https://api.example.test/openai#"),
+        "https://api.example.test/openai/audio/transcriptions"
     );
 }
 

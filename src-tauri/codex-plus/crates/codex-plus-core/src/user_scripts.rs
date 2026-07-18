@@ -10,6 +10,8 @@ use serde_json::{Map, Value, json};
 
 use crate::script_market::MarketScript;
 
+const USER_SCRIPT_RUNTIME_REVISION: &str = "2";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct UserScriptConfig {
     pub enabled: bool,
@@ -252,17 +254,20 @@ impl UserScriptManager {
 
     pub fn build_enabled_bundle(&self) -> anyhow::Result<String> {
         let config = self.load_config();
-        if !config.enabled {
-            return Ok(String::new());
-        }
-        let mut blocks = Vec::new();
-        for script in self.scan_script_files(&config)? {
-            if !script.enabled {
-                continue;
-            }
+        let scripts = self.scan_script_files(&config)?;
+        let enabled_scripts = scripts
+            .iter()
+            .filter(|script| config.enabled && script.enabled)
+            .collect::<Vec<_>>();
+        let enabled_keys = enabled_scripts
+            .iter()
+            .map(|script| script.key.as_str())
+            .collect::<Vec<_>>();
+        let mut blocks = vec![user_script_runtime_prelude(&enabled_keys)];
+        for script in enabled_scripts {
             let source = fs::read_to_string(&script.path)
                 .unwrap_or_else(|error| format!("throw new Error({});", json!(error.to_string())));
-            blocks.push(wrap_script(&script, &source));
+            blocks.push(wrap_script(script, &source));
         }
         Ok(blocks.join("\n"))
     }
@@ -426,15 +431,113 @@ struct UserScriptFile {
     enabled: bool,
 }
 
+fn user_script_runtime_prelude(enabled_keys: &[&str]) -> String {
+    format!(
+        r#"
+(() => {{
+  const registry = window.__codexPlusUserScripts = window.__codexPlusUserScripts || {{ scripts: {{}} }};
+  registry.scripts = registry.scripts && typeof registry.scripts === "object" ? registry.scripts : {{}};
+  registry.resolveCleanup = (key, name) => {{
+    const identity = `${{String(key || "").toLowerCase()}} ${{String(name || "").toLowerCase()}}`;
+    if (identity.includes("bennett-ui-improvements")) {{
+      return () => window.__bennettUiImprovementsBigPizza?.stop?.();
+    }}
+    if (identity.includes("codex-daily-token-usage")) {{
+      return () => window.__codexDailyTokenUsage?.destroy?.();
+    }}
+    if (identity.includes("codex-list-pagebuster")) {{
+      return () => window.__codexListPagebuster?.stop?.();
+    }}
+    if (identity.includes("tux-toolbar-buddy")) {{
+      return () => window.__tuxToolbarBuddy?.dispose?.();
+    }}
+    if (identity.includes("codex-token-usage")) {{
+      return () => window.__codexTokenUsage?.destroy?.();
+    }}
+    return null;
+  }};
+  registry.installPerformanceGuard = (key, name) => {{
+    const identity = `${{String(key || "").toLowerCase()}} ${{String(name || "").toLowerCase()}}`;
+    if (!identity.includes("tux-toolbar-buddy")) return null;
+    const NativeMutationObserver = window.MutationObserver;
+    if (typeof NativeMutationObserver !== "function") return null;
+    const toolbarSelector = '#codex-plus-menu, [data-codex-plus-menu="true"]';
+    const nodeTouchesToolbar = (node) => {{
+      const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+      if (!(element instanceof Element)) return false;
+      return element.matches?.(toolbarSelector)
+        || !!element.closest?.(toolbarSelector)
+        || !!element.querySelector?.(toolbarSelector);
+    }};
+    const ScopedMutationObserver = class {{
+      constructor(callback) {{
+        this.nativeObserver = new NativeMutationObserver((mutations) => {{
+          const relevant = mutations.filter((mutation) => {{
+            if (nodeTouchesToolbar(mutation.target)) return true;
+            return Array.from(mutation.addedNodes || []).some(nodeTouchesToolbar)
+              || Array.from(mutation.removedNodes || []).some(nodeTouchesToolbar);
+          }});
+          if (relevant.length) callback(relevant, this);
+        }});
+      }}
+      observe(...args) {{
+        return this.nativeObserver.observe(...args);
+      }}
+      disconnect() {{
+        return this.nativeObserver.disconnect();
+      }}
+      takeRecords() {{
+        return this.nativeObserver.takeRecords();
+      }}
+    }};
+    window.MutationObserver = ScopedMutationObserver;
+    return () => {{
+      if (window.MutationObserver === ScopedMutationObserver) {{
+        window.MutationObserver = NativeMutationObserver;
+      }}
+    }};
+  }};
+  registry.cleanupEntry = (key, reason = "disabled") => {{
+    const entry = registry.scripts[key];
+    if (!entry || (entry.status === "disabled" && typeof entry.cleanup !== "function")) return;
+    let cleanupError = "";
+    const cleanup = typeof entry.cleanup === "function"
+      ? entry.cleanup
+      : registry.resolveCleanup(key, entry.name);
+    if (typeof cleanup === "function") {{
+      try {{
+        cleanup();
+      }} catch (error) {{
+        cleanupError = String(error && (error.stack || error.message) || error);
+      }}
+    }}
+    entry.status = "disabled";
+    entry.error = "";
+    entry.cleanupError = cleanupError;
+    entry.disabledReason = reason;
+    entry.disabledAt = new Date().toISOString();
+    entry.cleanup = null;
+  }};
+  const enabledKeys = new Set({enabled_keys});
+  for (const key of Object.keys(registry.scripts)) {{
+    if (!enabledKeys.has(key)) registry.cleanupEntry(key, "disabled-or-removed");
+  }}
+}})();
+"#,
+        enabled_keys = json!(enabled_keys).to_string(),
+    )
+}
+
 fn wrap_script(script: &UserScriptFile, source: &str) -> String {
     let fingerprint = script_fingerprint(&script.key, source);
     format!(
         r#"
 (() => {{
-  window.__codexPlusUserScripts = window.__codexPlusUserScripts || {{ scripts: {{}} }};
+  const registry = window.__codexPlusUserScripts = window.__codexPlusUserScripts || {{ scripts: {{}} }};
   const key = {key};
+  const name = {name};
   const fingerprint = {fingerprint};
-  const previous = window.__codexPlusUserScripts.scripts[key];
+  const previous = registry.scripts[key];
   if (previous && previous.fingerprint === fingerprint && previous.status === "loaded") {{
     previous.lastCheckedAt = new Date().toISOString();
     return;
@@ -447,14 +550,22 @@ fn wrap_script(script: &UserScriptFile, source: &str) -> String {
       cleanupError = String(error && (error.stack || error.message) || error);
     }}
   }}
-  window.__codexPlusUserScripts.scripts[key] = {{ key, name: {name}, source: {source_name}, fingerprint, status: "loading", error: "", cleanupError, loadedAt: new Date().toISOString() }};
+  registry.scripts[key] = {{ key, name, source: {source_name}, fingerprint, status: "loading", error: "", cleanupError, loadedAt: new Date().toISOString(), cleanup: null }};
+  let performanceGuardCleanup = null;
   try {{
+    performanceGuardCleanup = registry.installPerformanceGuard?.(key, name) || null;
 {source}
-    window.__codexPlusUserScripts.scripts[key].status = "loaded";
-    window.__codexPlusUserScripts.scripts[key].loadedAt = new Date().toISOString();
+    const current = registry.scripts[key];
+    if (typeof current.cleanup !== "function") {{
+      current.cleanup = registry.resolveCleanup?.(key, name) || null;
+    }}
+    current.status = "loaded";
+    current.loadedAt = new Date().toISOString();
   }} catch (error) {{
-    window.__codexPlusUserScripts.scripts[key].status = "failed";
-    window.__codexPlusUserScripts.scripts[key].error = String(error && (error.stack || error.message) || error);
+    registry.scripts[key].status = "failed";
+    registry.scripts[key].error = String(error && (error.stack || error.message) || error);
+  }} finally {{
+    if (typeof performanceGuardCleanup === "function") performanceGuardCleanup();
   }}
 }})();
 "#,
@@ -468,6 +579,7 @@ fn wrap_script(script: &UserScriptFile, source: &str) -> String {
 
 fn script_fingerprint(key: &str, source: &str) -> String {
     let mut hasher = DefaultHasher::new();
+    USER_SCRIPT_RUNTIME_REVISION.hash(&mut hasher);
     key.hash(&mut hasher);
     source.hash(&mut hasher);
     format!("{:016x}", hasher.finish())

@@ -1,14 +1,17 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  PresenceRegistry,
   RoomRegistry,
   SlidingRateLimit,
   tokenDigest,
   tokenMatches,
   validateAuth,
+  validateMobilePresence,
   validateRelayFrame,
 } from './relay-core.mjs'
 import { EncryptedUploadStore } from './upload-store.mjs'
+import { deriveRelayPairingKey } from './web/relay-pairing-crypto.js'
 
 const auth = {
   protocolVersion: 1,
@@ -88,6 +91,165 @@ test('rate limit rejects excess messages inside the window', () => {
   assert.equal(limit.accept(1_100), true)
   assert.equal(limit.accept(1_200), false)
   assert.equal(limit.accept(2_001), true)
+})
+
+function mockSocket() {
+  return {
+    closed: false,
+    close() { this.closed = true },
+  }
+}
+
+test('presence registry discovers mobile and desktop devices without exposing room credentials', () => {
+  const presence = new PresenceRegistry()
+  const mobile = presence.registerMobile({
+    protocolVersion: 1,
+    kind: 'presence.mobile.register',
+    deviceId: 'mobile-device-1',
+    deviceName: 'WEK 手机',
+    browser: 'Chrome Mobile',
+    platform: 'Android',
+  }, mockSocket(), '192.0.2.10')
+  assert.equal(mobile.error, undefined)
+  assert.equal(presence.mobileList()[0].deviceName, 'WEK 手机')
+  assert.equal('remoteAddress' in presence.mobileList()[0], false)
+
+  const desktopConnection = {
+    socket: mockSocket(),
+    channel: 'room',
+    role: 'desktop',
+    deviceId: auth.deviceId,
+    pairingLimiter: new SlidingRateLimit(12),
+  }
+  const desktop = presence.registerDesktop(desktopConnection, {
+    protocolVersion: 1,
+    kind: 'presence.desktop.status',
+    senderDeviceId: auth.deviceId,
+    payload: {
+      deviceName: '工作电脑',
+      remoteEnabled: true,
+      paused: false,
+      codexInstalled: true,
+      codexRunning: true,
+      codexAuthenticated: true,
+      appServerAvailable: true,
+      activeSessions: 2,
+      token: 'must-not-leak',
+    },
+  })
+  assert.equal(desktop.status.deviceName, '工作电脑')
+  assert.equal(desktop.status.appServerAvailable, true)
+  assert.equal('token' in desktop.status, false)
+  assert.equal(presence.desktopList().length, 1)
+})
+
+test('presence registry removes offline devices and enforces temporary mobile capacity', () => {
+  const presence = new PresenceRegistry({ maxMobiles: 1 })
+  const first = presence.registerMobile({
+    protocolVersion: 1,
+    kind: 'presence.mobile.register',
+    deviceId: 'mobile-device-1',
+    deviceName: '手机一',
+    browser: 'Chrome',
+    platform: 'Android',
+  }, mockSocket())
+  const rejected = presence.registerMobile({
+    protocolVersion: 1,
+    kind: 'presence.mobile.register',
+    deviceId: 'mobile-device-2',
+    deviceName: '手机二',
+    browser: 'Safari',
+    platform: 'iOS',
+  }, mockSocket())
+  assert.match(rejected.error, /上限/)
+  const events = presence.remove(first.connection)
+  assert.equal(events[0].message.kind, 'presence.mobile.offline')
+  assert.equal(presence.mobileList().length, 0)
+  assert.equal(validateMobilePresence({ kind: 'presence.mobile.register' }), '设备发现消息无效')
+})
+
+test('pairing routes are role isolated, expire, and complete only once', () => {
+  const presence = new PresenceRegistry({ pairingTtlMs: 100 })
+  const mobile = presence.registerMobile({
+    protocolVersion: 1,
+    kind: 'presence.mobile.register',
+    deviceId: 'mobile-device-1',
+    deviceName: '手机',
+    browser: 'Chrome',
+    platform: 'Android',
+  }, mockSocket()).connection
+  const desktop = {
+    socket: mockSocket(),
+    channel: 'room',
+    role: 'desktop',
+    deviceId: auth.deviceId,
+    pairingLimiter: new SlidingRateLimit(12),
+  }
+  presence.registerDesktop(desktop, {
+    protocolVersion: 1,
+    kind: 'presence.desktop.status',
+    senderDeviceId: auth.deviceId,
+    payload: { deviceName: '电脑', remoteEnabled: true },
+  })
+  const request = {
+    protocolVersion: 1,
+    kind: 'pairing.request',
+    messageId: 'pair-message-1',
+    pairingId: 'pairing-request-123456',
+    senderDeviceId: mobile.deviceId,
+    targetDeviceId: desktop.deviceId,
+    payload: {},
+  }
+  assert.equal(presence.pairingRoute(request, mobile, 1_000).target, desktop)
+  assert.match(
+    presence.pairingRoute({ ...request, kind: 'pairing.completed' }, mobile, 1_001).error,
+    /角色/,
+  )
+  assert.equal(presence.pairingRoute({
+    ...request,
+    kind: 'pairing.challenge',
+    senderDeviceId: desktop.deviceId,
+    targetDeviceId: mobile.deviceId,
+  }, desktop, 1_002).target, mobile)
+  assert.equal(presence.pairingRoute({
+    ...request,
+    kind: 'pairing.proof',
+  }, mobile, 1_003).target, desktop)
+  assert.equal(presence.pairingRoute({
+    ...request,
+    kind: 'pairing.completed',
+    senderDeviceId: desktop.deviceId,
+    targetDeviceId: mobile.deviceId,
+  }, desktop, 1_004).target, mobile)
+  assert.match(presence.pairingRoute({
+    ...request,
+    kind: 'pairing.completed',
+    senderDeviceId: desktop.deviceId,
+    targetDeviceId: mobile.deviceId,
+  }, desktop, 1_005).error, /不存在/)
+
+  const expiring = { ...request, pairingId: 'pairing-request-expired' }
+  assert.equal(presence.pairingRoute(expiring, mobile, 2_000).target, desktop)
+  assert.match(presence.pairingRoute({
+    ...expiring,
+    kind: 'pairing.challenge',
+    senderDeviceId: desktop.deviceId,
+    targetDeviceId: mobile.deviceId,
+  }, desktop, 2_101).error, /不存在|过期/)
+})
+
+test('browser and desktop derive the same HKDF relay pairing key', () => {
+  const key = deriveRelayPairingKey({
+    sharedSecret: new Uint8Array(32).fill(8),
+    code: '123456',
+    pairingId: 'pair',
+    mobileDeviceId: 'mobile',
+    desktopDeviceId: 'desktop',
+  })
+  assert.equal(
+    Buffer.from(key).toString('hex'),
+    '2c074647ed6dbfc30d19a7191169b190b396aa389bd4213e9d922967c9330dcb',
+  )
 })
 
 test('encrypted uploads are isolated, expire, and can only be consumed once', () => {

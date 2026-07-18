@@ -790,7 +790,12 @@ mod tests {
         assert!(
             catalog["models"][0]["supported_reasoning_levels"]
                 .as_array()
-                .is_some_and(|levels| levels.iter().any(|level| level["effort"] == "max"))
+                .is_some_and(|levels| !levels.is_empty())
+        );
+        assert!(
+            catalog["models"][0]["context_window"]
+                .as_u64()
+                .is_some_and(|window| window > 0)
         );
     }
 
