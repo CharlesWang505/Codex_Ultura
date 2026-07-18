@@ -12,9 +12,14 @@ use super::lan_pairing::{
     LanPairingInvitation, LanPairingManager, LanPairingRuntimeTask, LanPairingSnapshot,
 };
 use super::monitor::{RemoteMonitor, RemoteMonitorSnapshot};
+use super::protocol::unix_timestamp_ms;
 use super::relay_client::{self, CommandCache, RuntimeStatus};
+use super::relay_pairing::{RelayPairingInvitation, RelayPairingManager, RelayPairingSnapshot};
 use super::settings::{PublicSettings, RemoteSettings, SettingsStore};
 use super::workspace::{AuthorizedWorkspace, WorkspaceImportResult, WorkspaceStore};
+
+const INITIAL_RECONNECT_DELAY_SECS: u64 = 5;
+const MAX_RECONNECT_DELAY_SECS: u64 = 60;
 
 #[derive(Clone)]
 pub struct RemoteControlManager {
@@ -22,9 +27,11 @@ pub struct RemoteControlManager {
     status: Arc<RwLock<RuntimeStatus>>,
     replay: Arc<Mutex<HashMap<String, ReplayGuard>>>,
     commands: Arc<Mutex<HashMap<String, CommandCache>>>,
+    restart_lock: Arc<Mutex<()>>,
     task: Arc<Mutex<Option<RemoteRuntimeTask>>>,
     lan_task: Arc<Mutex<Option<LanPairingRuntimeTask>>>,
     lan_pairing: LanPairingManager,
+    relay_pairing: RelayPairingManager,
     monitor: RemoteMonitor,
 }
 
@@ -46,6 +53,7 @@ pub struct RemoteControlSnapshot {
     pub last_error: Option<String>,
     pub active_sessions: usize,
     pub lan_pairing: LanPairingSnapshot,
+    pub relay_pairing: RelayPairingSnapshot,
 }
 
 impl RemoteControlManager {
@@ -58,9 +66,11 @@ impl RemoteControlManager {
             })),
             replay: Arc::new(Mutex::new(HashMap::new())),
             commands: Arc::new(Mutex::new(HashMap::new())),
+            restart_lock: Arc::new(Mutex::new(())),
             task: Arc::new(Mutex::new(None)),
             lan_task: Arc::new(Mutex::new(None)),
             lan_pairing: LanPairingManager::new(),
+            relay_pairing: RelayPairingManager::new(),
             monitor: RemoteMonitor::new(app),
         }
     }
@@ -81,6 +91,7 @@ impl RemoteControlManager {
         let workspaces = self.workspace_store().load()?;
         let status = self.status.read().await.clone();
         let lan_pairing = self.lan_pairing.snapshot().await;
+        let relay_pairing = self.relay_pairing.snapshot().await;
         Ok(RemoteControlSnapshot {
             settings: PublicSettings::from(&settings),
             workspaces,
@@ -92,6 +103,7 @@ impl RemoteControlManager {
             last_error: status.last_error,
             active_sessions: status.active_sessions,
             lan_pairing,
+            relay_pairing,
         })
     }
 
@@ -115,6 +127,7 @@ impl RemoteControlManager {
     }
 
     pub async fn restart(&self) -> Result<(), String> {
+        let _restart_guard = self.restart_lock.lock().await;
         self.stop().await;
         let settings = self.settings_store().load_or_create()?;
         if !settings.enabled {
@@ -142,6 +155,7 @@ impl RemoteControlManager {
         let manager = self.clone();
         let (stop, mut stop_rx) = watch::channel(false);
         let task = tokio::spawn(async move {
+            let mut reconnect_attempt = 0u32;
             loop {
                 let result = relay_client::run(
                     settings.clone(),
@@ -150,19 +164,28 @@ impl RemoteControlManager {
                     manager.replay.clone(),
                     manager.commands.clone(),
                     manager.monitor.clone(),
+                    manager.relay_pairing.clone(),
                     stop_rx.clone(),
                 )
                 .await;
-                if let Err(error) = result {
+                if let Err(error) = &result {
                     let mut status = manager.status.write().await;
                     status.connection = "disconnected".into();
-                    status.last_error = Some(error);
+                    status.last_error = Some(error.clone());
+                    drop(status);
+                    manager.monitor.status_changed().await;
                 }
                 if !settings.auto_reconnect || *stop_rx.borrow() {
                     break;
                 }
+                reconnect_attempt = if result.is_ok() {
+                    0
+                } else {
+                    reconnect_attempt.saturating_add(1)
+                };
+                let delay = reconnect_delay(reconnect_attempt.max(1));
                 tokio::select! {
-                    _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {}
+                    _ = tokio::time::sleep(delay) => {}
                     changed = stop_rx.changed() => {
                         if changed.is_err() || *stop_rx.borrow() { break; }
                     }
@@ -189,8 +212,20 @@ impl RemoteControlManager {
             super::lan_pairing::stop_runtime_task(task).await;
         }
         self.lan_pairing.stop_runtime().await;
+        self.relay_pairing.stop_runtime().await;
         self.status.write().await.connection = "disabled".into();
         self.monitor.disconnected().await;
+        self.monitor.status_changed().await;
+    }
+
+    pub async fn shutdown_and_disable(&self) {
+        self.stop().await;
+        if let Ok(mut settings) = self.settings_store().load_or_create() {
+            if settings.enabled {
+                settings.enabled = false;
+                let _ = self.settings_store().save(&settings);
+            }
+        }
     }
 
     pub async fn set_paused(&self, paused: bool) -> Result<RemoteControlSnapshot, String> {
@@ -219,6 +254,21 @@ impl RemoteControlManager {
 
     pub async fn reject_lan_pairing(&self, request_id: &str) -> Result<(), String> {
         self.lan_pairing.reject(request_id).await
+    }
+
+    pub async fn invite_relay_mobile(
+        &self,
+        device_id: &str,
+    ) -> Result<RelayPairingInvitation, String> {
+        self.relay_pairing.create_invitation(device_id).await
+    }
+
+    pub async fn reject_relay_pairing(&self, pairing_id: &str) -> Result<(), String> {
+        self.relay_pairing.reject(pairing_id).await
+    }
+
+    pub async fn refresh_relay_mobiles(&self) -> Result<(), String> {
+        self.relay_pairing.request_mobile_list().await
     }
 
     pub fn add_workspace(
@@ -268,4 +318,14 @@ impl RemoteControlManager {
         let projects = CodexProjectCatalog::load(&workspaces)?.projects();
         self.workspace_store().import_codex_projects(&projects)
     }
+}
+
+fn reconnect_delay(attempt: u32) -> std::time::Duration {
+    let exponent = attempt.saturating_sub(1).min(4);
+    let base_seconds = INITIAL_RECONNECT_DELAY_SECS
+        .saturating_mul(1u64 << exponent)
+        .min(MAX_RECONNECT_DELAY_SECS);
+    let jitter_ms = unix_timestamp_ms() % 1_000;
+    let delay_ms = (base_seconds * 1_000 + jitter_ms).min(MAX_RECONNECT_DELAY_SECS * 1_000);
+    std::time::Duration::from_millis(delay_ms)
 }

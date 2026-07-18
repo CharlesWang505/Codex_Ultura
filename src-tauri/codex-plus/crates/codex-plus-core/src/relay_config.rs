@@ -691,8 +691,14 @@ fn relay_profile_test_payload(protocol: RelayProtocol, model: &str) -> Value {
     match protocol {
         RelayProtocol::Responses => serde_json::json!({
             "model": model,
-            "input": "hi",
-            "max_output_tokens": 16
+            "input": [{
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "hi"
+                }]
+            }],
+            "stream": true
         }),
         RelayProtocol::ChatCompletions => serde_json::json!({
             "model": model,
@@ -2605,6 +2611,18 @@ fn account_label_from_jwt(token: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relay_profile_test_payload_uses_codex_compatible_responses_shape() {
+        let payload = relay_profile_test_payload(RelayProtocol::Responses, "gpt-5.6-sol");
+
+        assert_eq!(payload["model"], "gpt-5.6-sol");
+        assert_eq!(payload["stream"], true);
+        assert_eq!(payload["input"][0]["role"], "user");
+        assert_eq!(payload["input"][0]["content"][0]["type"], "input_text");
+        assert_eq!(payload["input"][0]["content"][0]["text"], "hi");
+        assert!(payload.get("max_output_tokens").is_none());
+    }
 
     #[test]
     fn backfill_relay_profile_from_home_with_common_restores_template_provider_id() {

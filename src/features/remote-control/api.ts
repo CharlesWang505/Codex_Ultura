@@ -4,6 +4,7 @@ import type {
   CodexProject,
   LanPairingInvitation,
   PairingInfo,
+  RelayPairingInvitation,
   RemoteControlSnapshot,
   RemoteMonitorSnapshot,
   RemoteSettings,
@@ -28,6 +29,12 @@ export const approveLanPairing = (requestId: string) =>
   invoke<RemoteControlSnapshot>('remote_control_approve_lan_pairing', { requestId })
 export const rejectLanPairing = (requestId: string) =>
   invoke<RemoteControlSnapshot>('remote_control_reject_lan_pairing', { requestId })
+export const inviteRelayMobile = (deviceId: string) =>
+  invoke<RelayPairingInvitation>('remote_control_invite_relay_mobile', { deviceId })
+export const rejectRelayPairing = (pairingId: string) =>
+  invoke<RemoteControlSnapshot>('remote_control_reject_relay_pairing', { pairingId })
+export const refreshRelayMobiles = () =>
+  invoke<RemoteControlSnapshot>('remote_control_refresh_relay_mobiles')
 export const addRemoteWorkspace = (input: Omit<AuthorizedWorkspace, 'id'>) =>
   invoke<AuthorizedWorkspace[]>('remote_control_add_workspace', input)
 export const removeRemoteWorkspace = (id: string) =>

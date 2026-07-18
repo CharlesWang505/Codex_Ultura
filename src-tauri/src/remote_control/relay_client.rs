@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
-use tokio::sync::{Mutex, RwLock, watch};
+use tokio::sync::{Mutex, RwLock, mpsc, watch};
 use tokio_tungstenite::tungstenite::Message;
 
 use super::attachments::{RemoteAttachment, prepare_attachments};
@@ -16,6 +16,7 @@ use super::protocol::{
     MAX_RELAY_MESSAGE_BYTES, PROTOCOL_VERSION, RelayAuth, RelayFrame, RemoteMessage,
     unix_timestamp_ms,
 };
+use super::relay_pairing::RelayPairingManager;
 use super::sessions::list_remote_sessions;
 use super::settings::RemoteSettings;
 use super::workspace::{AuthorizedWorkspace, authorized_workspace_for_path};
@@ -66,9 +67,11 @@ pub async fn run(
     replay: Arc<Mutex<HashMap<String, ReplayGuard>>>,
     commands: Arc<Mutex<HashMap<String, CommandCache>>>,
     monitor: RemoteMonitor,
+    relay_pairing: RelayPairingManager,
     mut stop: watch::Receiver<bool>,
 ) -> Result<(), String> {
     status.write().await.connection = "connecting".into();
+    monitor.status_changed().await;
     let (socket, _) = tokio_tungstenite::connect_async(&settings.relay_url)
         .await
         .map_err(|error| format!("无法连接中继服务器：{error}"))?;
@@ -104,7 +107,58 @@ pub async fn run(
             .to_string());
     }
 
-    let app_server = AppServerClient::start().await?;
+    let (pairing_outbound, mut pairing_incoming) = mpsc::unbounded_channel();
+    relay_pairing
+        .start_runtime(&settings, pairing_outbound)
+        .await;
+    send_plain(
+        &mut writer,
+        json!({
+            "protocolVersion": PROTOCOL_VERSION,
+            "kind": "presence.desktop.status",
+            "messageId": uuid::Uuid::new_v4().to_string(),
+            "senderDeviceId": settings.desktop_device_id,
+            "payload": {
+                "deviceName": settings.device_name,
+                "remoteEnabled": settings.enabled,
+                "paused": settings.paused,
+                "codexInstalled": false,
+                "codexRunning": false,
+                "codexAuthenticated": false,
+                "appServerAvailable": false,
+                "activeSessions": 0,
+            }
+        }),
+    )
+    .await?;
+
+    let app_server = match AppServerClient::start().await {
+        Ok(app_server) => app_server,
+        Err(error) => {
+            let _ = send_plain(
+                &mut writer,
+                json!({
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "kind": "presence.desktop.status",
+                    "messageId": uuid::Uuid::new_v4().to_string(),
+                    "senderDeviceId": settings.desktop_device_id,
+                    "payload": {
+                        "deviceName": settings.device_name,
+                        "remoteEnabled": settings.enabled,
+                        "paused": settings.paused,
+                        "codexInstalled": true,
+                        "codexRunning": false,
+                        "codexAuthenticated": false,
+                        "appServerAvailable": false,
+                        "activeSessions": 0,
+                    }
+                }),
+            )
+            .await;
+            relay_pairing.stop_runtime().await;
+            return Err(error);
+        }
+    };
     let account = app_server.account_status().await?;
     let auth_type = account
         .pointer("/account/type")
@@ -118,6 +172,12 @@ pub async fn run(
         current.last_connected_at = Some(unix_timestamp_ms());
         current.last_error = None;
     }
+    monitor.status_changed().await;
+    send_plain(
+        &mut writer,
+        presence_status_message(&settings, &status).await,
+    )
+    .await?;
 
     let mut events = app_server.subscribe();
     let mut heartbeat = tokio::time::interval(Duration::from_secs(settings.heartbeat_seconds));
@@ -158,6 +218,9 @@ pub async fn run(
                     Err(_) => continue,
                 };
                 if value.get("kind").and_then(Value::as_str) == Some("ack") {
+                    continue;
+                }
+                if relay_pairing.handle_server_message(value.clone()).await {
                     continue;
                 }
                 let frame: RelayFrame = match serde_json::from_value(value) {
@@ -235,6 +298,10 @@ pub async fn run(
                 }
             }
             _ = heartbeat.tick() => {
+                send_plain(
+                    &mut writer,
+                    presence_status_message(&settings, &status).await,
+                ).await?;
                 send_remote(
                     &mut writer,
                     &settings,
@@ -242,6 +309,12 @@ pub async fn run(
                     None,
                     RemoteMessage::event("device.heartbeat", None, None, None, json!({"at": unix_timestamp_ms()})),
                 ).await?;
+            }
+            outgoing = pairing_incoming.recv() => {
+                let Some(outgoing) = outgoing else {
+                    break Err("公网配对消息通道已关闭".to_string());
+                };
+                send_plain(&mut writer, outgoing).await?;
             }
             changed = stop.changed() => {
                 if changed.is_err() || *stop.borrow() {
@@ -252,8 +325,49 @@ pub async fn run(
     };
 
     app_server.stop().await;
+    relay_pairing.stop_runtime().await;
     monitor.disconnected().await;
+    monitor.status_changed().await;
     loop_result
+}
+
+async fn presence_status_message(
+    settings: &RemoteSettings,
+    status: &Arc<RwLock<RuntimeStatus>>,
+) -> Value {
+    let current = status.read().await.clone();
+    json!({
+        "protocolVersion": PROTOCOL_VERSION,
+        "kind": "presence.desktop.status",
+        "messageId": uuid::Uuid::new_v4().to_string(),
+        "senderDeviceId": settings.desktop_device_id,
+        "payload": {
+            "deviceName": settings.device_name,
+            "remoteEnabled": settings.enabled,
+            "paused": settings.paused,
+            "codexInstalled": current.codex_version.is_some(),
+            "codexRunning": current.codex_version.is_some(),
+            "codexAuthenticated": current.auth_type.is_some(),
+            "appServerAvailable": current.codex_version.is_some(),
+            "codexVersion": current.codex_version,
+            "activeSessions": current.active_sessions,
+        }
+    })
+}
+
+async fn send_plain<S>(writer: &mut S, value: Value) -> Result<(), String>
+where
+    S: futures_util::Sink<Message> + Unpin,
+    S::Error: std::fmt::Display,
+{
+    let text = serde_json::to_string(&value).map_err(|_| "无法编码设备发现消息".to_string())?;
+    if text.len() > MAX_RELAY_MESSAGE_BYTES {
+        return Err("设备发现消息超过大小限制".to_string());
+    }
+    writer
+        .send(Message::Text(text.into()))
+        .await
+        .map_err(|error| format!("无法发送设备发现消息：{error}"))
 }
 
 async fn handle_command(

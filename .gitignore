@@ -13,9 +13,19 @@ dist
 dist-ssr
 dist_verify
 release
+output
+tmp
+.codex-build
 src-tauri/target
 sensitive
 *.local
+
+# Generated web bundles
+server/web/*.bundle.js
+
+# Legacy theme reference images (not part of public builds)
+src-tauri/codex-plus/assets/theme-studio/rose-garden-hero.webp
+src-tauri/codex-plus/assets/theme-studio/starlight-stage-hero.webp
 
 # Local credentials and runtime state
 .env

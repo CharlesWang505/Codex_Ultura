@@ -4,6 +4,11 @@ import {
   localizeScope,
   localizeSkill,
 } from './capability-i18n.js'
+import {
+  createRelayPairingExchange,
+  decryptRelayPairingCredentials,
+} from './relay-pairing-crypto.js'
+import { renderMessageMarkdown } from './message-format.js'
 
 const PROTOCOL_VERSION = 1
 const MAX_MESSAGE_BYTES = 512 * 1024
@@ -16,11 +21,45 @@ const decoder = new TextDecoder()
 const elements = Object.fromEntries([...document.querySelectorAll('[id]')].map((element) => [element.id, element]))
 const query = new URLSearchParams(location.search)
 const fragment = new URLSearchParams(location.hash.slice(1))
-const credentials = {
+const storedCredentialsKey = 'codexCompassRemoteCredentials:v1'
+const suppliedCredentials = {
   roomId: query.get('room') || '',
   desktopDeviceId: query.get('desktop') || '',
   token: fragment.get('token') || '',
   key: fragment.get('key') || '',
+}
+const storedCredentials = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(storedCredentialsKey) || 'null') || {}
+  } catch {
+    return {}
+  }
+})()
+const suppliedCredentialsComplete = suppliedCredentials.roomId
+  && suppliedCredentials.desktopDeviceId
+  && suppliedCredentials.token.length >= 32
+  && suppliedCredentials.key.length >= 32
+const credentials = suppliedCredentialsComplete ? suppliedCredentials : {
+  roomId: storedCredentials.roomId || '',
+  desktopDeviceId: storedCredentials.desktopDeviceId || '',
+  token: storedCredentials.token || '',
+  key: storedCredentials.key || '',
+}
+const credentialsComplete = Boolean(
+  credentials.roomId
+  && credentials.desktopDeviceId
+  && credentials.token.length >= 32
+  && credentials.key.length >= 32,
+)
+if (suppliedCredentialsComplete) {
+  localStorage.setItem(storedCredentialsKey, JSON.stringify({
+    protocolVersion: PROTOCOL_VERSION,
+    ...suppliedCredentials,
+  }))
+  query.delete('room')
+  query.delete('desktop')
+  const cleanSearch = query.toString()
+  history.replaceState(null, '', `${location.pathname}${cleanSearch ? `?${cleanSearch}` : ''}`)
 }
 const outgoingSequenceKey = `codexCompassRemoteSequence:${credentials.roomId}:${credentials.desktopDeviceId}`
 const incomingSequenceKey = `codexCompassRemoteHighestSequence:${credentials.roomId}:${credentials.desktopDeviceId}`
@@ -29,6 +68,7 @@ const storedIncomingSequence = Number(localStorage.getItem(incomingSequenceKey))
 
 const state = {
   socket: null,
+  presenceSocket: null,
   cryptoKey: null,
   sequence: Math.max(
     Date.now() * 1000,
@@ -38,7 +78,14 @@ const state = {
   seenMessages: new Set(),
   deviceId: localStorage.getItem('codexCompassRemoteDeviceId') || crypto.randomUUID(),
   connected: false,
+  presenceConnected: false,
   desktopOnline: false,
+  desktops: [],
+  pairing: null,
+  pairingTimer: null,
+  presenceHeartbeatTimer: null,
+  presenceReconnectTimer: null,
+  presenceIntentionalClose: false,
   status: null,
   workspaces: [],
   models: [],
@@ -97,6 +144,7 @@ function icon(name, className = '') {
     close: ['<path d="m7 7 10 10M17 7 7 17"></path>'],
     file: ['<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path>', '<path d="M14 2v6h6"></path>'],
     skill: ['<rect width="7" height="7" x="3" y="3" rx="1"></rect>', '<rect width="7" height="7" x="14" y="3" rx="1"></rect>', '<rect width="7" height="7" x="3" y="14" rx="1"></rect>', '<path d="M17.5 14v7M14 17.5h7"></path>'],
+    computer: ['<rect width="18" height="12" x="3" y="3" rx="1.5"></rect>', '<path d="M8 21h8M12 15v6"></path>'],
   }
   svg.innerHTML = (definitions[name] || []).join('')
   return svg
@@ -197,13 +245,448 @@ function websocketUrl() {
   return url.toString()
 }
 
-async function connect() {
-  clearTimeout(state.reconnectTimer)
-  if (!credentials.roomId || !credentials.desktopDeviceId || credentials.token.length < 32 || credentials.key.length < 32) {
-    elements.setupMessage.textContent = '配对信息不完整，请从电脑端重新复制配对链接。'
-    setConnection('offline', '缺少配对信息')
+const mobileDeviceNameKey = 'codexCompassRemoteDeviceName'
+
+function browserName() {
+  const brands = navigator.userAgentData?.brands
+  if (Array.isArray(brands) && brands.length > 0) {
+    return brands
+      .filter((brand) => !/Not.A.Brand/i.test(brand.brand))
+      .map((brand) => `${brand.brand} ${brand.version}`)
+      .join(', ')
+      .slice(0, 240)
+  }
+  const agent = navigator.userAgent
+  if (/Edg\//.test(agent)) return 'Microsoft Edge'
+  if (/CriOS|Chrome\//.test(agent)) return 'Google Chrome'
+  if (/FxiOS|Firefox\//.test(agent)) return 'Mozilla Firefox'
+  if (/Safari\//.test(agent)) return 'Safari'
+  return '手机浏览器'
+}
+
+function platformName() {
+  return String(navigator.userAgentData?.platform || navigator.platform || '未知系统').slice(0, 120)
+}
+
+function defaultMobileDeviceName() {
+  const platform = platformName()
+  return `${platform === '未知系统' ? '我的' : platform} 手机`.slice(0, 80)
+}
+
+function currentMobileDeviceName() {
+  return (elements.mobileDeviceName?.value || localStorage.getItem(mobileDeviceNameKey) || defaultMobileDeviceName())
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim()
+    .slice(0, 80) || '未命名手机'
+}
+
+function sendPresence(value) {
+  if (!state.presenceConnected || state.presenceSocket?.readyState !== WebSocket.OPEN) {
+    throw new Error('手机网页尚未连接中继服务器')
+  }
+  state.presenceSocket.send(JSON.stringify({
+    protocolVersion: PROTOCOL_VERSION,
+    messageId: crypto.randomUUID(),
+    ...value,
+  }))
+}
+
+function discoveryAvailability(desktop) {
+  if (!desktop.remoteEnabled) return { available: false, text: '远控未开启', level: '' }
+  if (desktop.paused) return { available: false, text: '电脑已暂停远控', level: 'warn' }
+  if (!desktop.appServerAvailable) return { available: false, text: 'Codex 后端不可用', level: 'warn' }
+  if (!desktop.codexAuthenticated) return { available: false, text: 'Codex 尚未登录', level: 'warn' }
+  return {
+    available: true,
+    text: `Codex 在线 · ${desktop.activeSessions || 0} 个活动任务`,
+    level: 'online',
+  }
+}
+
+function renderDesktopDiscovery() {
+  if (!elements.desktopDiscoveryList) return
+  elements.desktopDiscoveryList.replaceChildren()
+  if (state.desktops.length === 0) {
+    const empty = document.createElement('div')
+    empty.className = 'desktop-discovery-empty'
+    empty.textContent = state.presenceConnected
+      ? '暂未发现在线电脑。请确认电脑端已开启手机远控并连接同一个中继网站。'
+      : '正在连接中继网站并查找在线电脑...'
+    elements.desktopDiscoveryList.append(empty)
     return
   }
+  for (const desktop of state.desktops) {
+    const availability = discoveryAvailability(desktop)
+    const row = document.createElement('article')
+    row.className = 'desktop-discovery-row'
+    const symbol = document.createElement('div')
+    symbol.className = 'desktop-discovery-icon'
+    symbol.append(icon('computer'))
+    const copy = document.createElement('div')
+    copy.className = 'desktop-discovery-copy'
+    const name = document.createElement('strong')
+    name.textContent = desktop.deviceName || 'Codex Compass'
+    const detail = document.createElement('span')
+    detail.textContent = desktop.codexVersion
+      ? `${desktop.codexVersion} · ${desktop.deviceId.slice(0, 8)}`
+      : `设备 ${desktop.deviceId.slice(0, 8)}`
+    const health = document.createElement('div')
+    health.className = 'desktop-discovery-health'
+    const indicator = document.createElement('i')
+    indicator.className = availability.level
+    const status = document.createElement('span')
+    status.textContent = availability.text
+    health.append(indicator, status)
+    copy.append(name, detail, health)
+    const connectButton = document.createElement('button')
+    connectButton.type = 'button'
+    connectButton.disabled = !availability.available || Boolean(state.pairing)
+    connectButton.textContent = availability.available ? '连接' : '不可连接'
+    connectButton.addEventListener('click', () => requestDesktopPairing(desktop))
+    row.append(symbol, copy, connectButton)
+    elements.desktopDiscoveryList.append(row)
+  }
+}
+
+function applyDesktopPresence(desktop) {
+  if (!desktop?.deviceId) return
+  const existing = state.desktops.findIndex((item) => item.deviceId === desktop.deviceId)
+  if (existing >= 0) state.desktops[existing] = desktop
+  else state.desktops.push(desktop)
+  state.desktops.sort((left, right) => (right.connectedAt || 0) - (left.connectedAt || 0))
+  if (credentialsComplete && desktop.deviceId === credentials.desktopDeviceId) {
+    state.desktopOnline = true
+    state.status = { ...(state.status || {}), ...desktop }
+    updateDeviceStatus()
+  }
+  renderDesktopDiscovery()
+}
+
+function removeDesktopPresence(deviceId) {
+  state.desktops = state.desktops.filter((desktop) => desktop.deviceId !== deviceId)
+  if (credentialsComplete && deviceId === credentials.desktopDeviceId) {
+    state.desktopOnline = false
+    updateDeviceStatus()
+  }
+  renderDesktopDiscovery()
+}
+
+function updatePairingDialog() {
+  const pairing = state.pairing
+  elements.pairingDialog.hidden = !pairing
+  if (!pairing) return
+  const ready = Boolean(pairing.desktopPublicKey)
+  const verifying = pairing.stage === 'verifying'
+  elements.pairingDialogMode.textContent = pairing.mode === 'desktop_invite'
+    ? '电脑发起邀请'
+    : '手机发起请求'
+  elements.pairingDialogTitle.textContent = pairing.desktopName || '连接电脑'
+  elements.pairingDialogMessage.textContent = ready
+    ? '请查看电脑端“手机远控”页面显示的六位配对码，并在这里输入。'
+    : '请求已发送。请在电脑端打开“手机远控”，等待电脑生成六位配对码。'
+  elements.pairingDialogStatus.textContent = verifying
+    ? '正在验证并接收加密凭据'
+    : ready ? '等待输入电脑配对码' : '等待电脑响应'
+  elements.relayPairingCode.disabled = !ready || verifying
+  elements.submitPairingButton.disabled = !ready || verifying
+  const seconds = Math.max(0, Math.ceil(((pairing.expiresAt || Date.now()) - Date.now()) / 1000))
+  elements.pairingDialogExpiry.textContent = seconds > 0 ? `${seconds} 秒后失效` : '配对请求已失效'
+  if (seconds <= 0) {
+    elements.relayPairingCode.disabled = true
+    elements.submitPairingButton.disabled = true
+  } else if (ready && !verifying) {
+    elements.relayPairingCode.focus()
+  }
+}
+
+function beginPairingDialog(pairing) {
+  state.pairing = pairing
+  elements.relayPairingCode.value = ''
+  clearInterval(state.pairingTimer)
+  state.pairingTimer = setInterval(updatePairingDialog, 1_000)
+  updatePairingDialog()
+  renderDesktopDiscovery()
+}
+
+function closePairingDialog({ notifyDesktop = false } = {}) {
+  const pairing = state.pairing
+  if (notifyDesktop && pairing && state.presenceConnected) {
+    try {
+      sendPresence({
+        kind: 'pairing.cancelled',
+        pairingId: pairing.pairingId,
+        senderDeviceId: state.deviceId,
+        targetDeviceId: pairing.desktopDeviceId,
+        payload: {},
+      })
+    } catch {
+      // The presence socket may already be closing.
+    }
+  }
+  clearInterval(state.pairingTimer)
+  state.pairingTimer = null
+  state.pairing = null
+  elements.pairingDialog.hidden = true
+  elements.relayPairingCode.value = ''
+  renderDesktopDiscovery()
+}
+
+function requestDesktopPairing(desktop) {
+  if (!state.presenceConnected || state.pairing) return
+  const pairingId = crypto.randomUUID()
+  beginPairingDialog({
+    pairingId,
+    desktopDeviceId: desktop.deviceId,
+    desktopName: desktop.deviceName || 'Codex Compass',
+    desktopPublicKey: '',
+    expiresAt: Date.now() + 120_000,
+    mode: 'mobile_request',
+    stage: 'waiting',
+  })
+  try {
+    sendPresence({
+      kind: 'pairing.request',
+      pairingId,
+      senderDeviceId: state.deviceId,
+      targetDeviceId: desktop.deviceId,
+      payload: {
+        deviceId: state.deviceId,
+        deviceName: currentMobileDeviceName(),
+        browser: browserName(),
+        platform: platformName(),
+      },
+    })
+  } catch (error) {
+    closePairingDialog()
+    showToast(error.message)
+  }
+}
+
+function submitRelayPairingCode() {
+  const pairing = state.pairing
+  if (!pairing?.desktopPublicKey || pairing.stage === 'verifying') return
+  const code = elements.relayPairingCode.value.replace(/\D/g, '').slice(0, 6)
+  if (code.length !== 6) {
+    showToast('请输入电脑端显示的六位配对码')
+    return
+  }
+  try {
+    const exchange = createRelayPairingExchange({
+      code,
+      pairingId: pairing.pairingId,
+      mobileDeviceId: state.deviceId,
+      desktopDeviceId: pairing.desktopDeviceId,
+      desktopPublicKey: pairing.desktopPublicKey,
+    })
+    pairing.exchange = exchange
+    pairing.stage = 'verifying'
+    sendPresence({
+      kind: 'pairing.proof',
+      pairingId: pairing.pairingId,
+      senderDeviceId: state.deviceId,
+      targetDeviceId: pairing.desktopDeviceId,
+      payload: {
+        clientPublicKey: exchange.clientPublicKey,
+        requestNonce: exchange.requestNonce,
+        proof: exchange.proof,
+      },
+    })
+    updatePairingDialog()
+  } catch (error) {
+    pairing.stage = 'ready'
+    updatePairingDialog()
+    showToast(error.message || '无法提交配对码')
+  }
+}
+
+function completeRelayPairing(value) {
+  const pairing = state.pairing
+  if (!pairing || value.pairingId !== pairing.pairingId || !pairing.exchange) return
+  try {
+    const pairedCredentials = decryptRelayPairingCredentials(pairing.exchange.pairingKey, value.payload)
+    if (pairedCredentials.desktopDeviceId !== pairing.desktopDeviceId) {
+      throw new Error('电脑返回的设备身份不匹配')
+    }
+    localStorage.setItem(storedCredentialsKey, JSON.stringify(pairedCredentials))
+    closePairingDialog()
+    elements.setupMessage.textContent = '配对完成，正在建立加密远控连接...'
+    location.reload()
+  } catch (error) {
+    pairing.stage = 'ready'
+    updatePairingDialog()
+    showToast(error.message || '无法解密电脑配对凭据')
+  }
+}
+
+function handlePresenceMessage(value) {
+  switch (value.kind) {
+    case 'presence.registered':
+      state.presenceConnected = true
+      if (!credentialsComplete) {
+        setConnection('online', '手机网页已上线')
+        elements.setupMessage.textContent = '选择一台在线电脑连接，或等待电脑主动向这台手机发出邀请。'
+      }
+      clearInterval(state.presenceHeartbeatTimer)
+      state.presenceHeartbeatTimer = setInterval(() => {
+        try {
+          sendPresence({ kind: 'presence.mobile.heartbeat' })
+        } catch {
+          // Reconnect logic handles a closed socket.
+        }
+      }, 20_000)
+      renderDesktopDiscovery()
+      break
+    case 'presence.desktop.list':
+      state.desktops = Array.isArray(value.desktops) ? value.desktops : []
+      state.desktops.sort((left, right) => (right.connectedAt || 0) - (left.connectedAt || 0))
+      for (const desktop of state.desktops) {
+        if (credentialsComplete && desktop.deviceId === credentials.desktopDeviceId) {
+          state.desktopOnline = true
+          state.status = { ...(state.status || {}), ...desktop }
+        }
+      }
+      renderDesktopDiscovery()
+      if (credentialsComplete) updateDeviceStatus()
+      break
+    case 'presence.desktop.online':
+      applyDesktopPresence(value.desktop)
+      break
+    case 'presence.desktop.offline':
+      removeDesktopPresence(value.deviceId)
+      break
+    case 'pairing.invite': {
+      const payload = value.payload || {}
+      beginPairingDialog({
+        pairingId: value.pairingId,
+        desktopDeviceId: value.senderDeviceId,
+        desktopName: payload.desktopName || 'Codex Compass',
+        desktopPublicKey: payload.desktopPublicKey || '',
+        expiresAt: value.expiresAt || Date.now() + 120_000,
+        mode: 'desktop_invite',
+        stage: 'ready',
+      })
+      break
+    }
+    case 'pairing.challenge': {
+      const pairing = state.pairing
+      if (!pairing || pairing.pairingId !== value.pairingId) return
+      pairing.desktopName = value.payload?.desktopName || pairing.desktopName
+      pairing.desktopPublicKey = value.payload?.desktopPublicKey || ''
+      pairing.expiresAt = value.expiresAt || pairing.expiresAt
+      pairing.stage = 'ready'
+      updatePairingDialog()
+      break
+    }
+    case 'pairing.completed':
+      completeRelayPairing(value)
+      break
+    case 'pairing.error':
+      if (state.pairing?.pairingId === value.pairingId) {
+        state.pairing.stage = 'ready'
+        state.pairing.exchange = null
+        elements.relayPairingCode.value = ''
+        updatePairingDialog()
+      }
+      showToast(value.payload?.message || value.message || '配对验证失败')
+      break
+    case 'pairing.rejected':
+    case 'pairing.cancelled':
+      if (state.pairing?.pairingId === value.pairingId) closePairingDialog()
+      showToast(value.payload?.message || (value.kind === 'pairing.rejected' ? '电脑已拒绝配对请求' : '配对已取消'))
+      break
+    case 'error':
+      if (value.pairingId && state.pairing?.pairingId === value.pairingId) {
+        state.pairing.stage = state.pairing.desktopPublicKey ? 'ready' : 'waiting'
+        updatePairingDialog()
+      }
+      showToast(value.message || '设备发现连接失败')
+      break
+  }
+}
+
+function startPresence() {
+  clearTimeout(state.presenceReconnectTimer)
+  if (
+    state.presenceSocket?.readyState === WebSocket.OPEN
+    || state.presenceSocket?.readyState === WebSocket.CONNECTING
+  ) return
+  if (!credentialsComplete) {
+    elements.setupView.classList.add('discovery-mode')
+    elements.discoveryControls.hidden = false
+    elements.connectButton.hidden = true
+    setConnection('connecting', '正在上线')
+  }
+  const socket = new WebSocket(websocketUrl())
+  state.presenceSocket = socket
+  socket.addEventListener('open', () => {
+    socket.send(JSON.stringify({
+      protocolVersion: PROTOCOL_VERSION,
+      kind: 'presence.mobile.register',
+      deviceId: state.deviceId,
+      deviceName: currentMobileDeviceName(),
+      browser: browserName(),
+      platform: platformName(),
+    }))
+  })
+  socket.addEventListener('message', (event) => {
+    if (typeof event.data !== 'string' || event.data.length > MAX_MESSAGE_BYTES) return
+    try {
+      handlePresenceMessage(JSON.parse(event.data))
+    } catch {
+      // Invalid discovery frames never reach the encrypted command channel.
+    }
+  })
+  socket.addEventListener('close', () => {
+    if (state.presenceSocket !== socket) return
+    state.presenceSocket = null
+    state.presenceConnected = false
+    state.desktops = []
+    clearInterval(state.presenceHeartbeatTimer)
+    state.presenceHeartbeatTimer = null
+    renderDesktopDiscovery()
+    if (!credentialsComplete) {
+      setConnection('offline', '手机在线连接断开')
+      elements.setupMessage.textContent = '无法连接中继网站，正在自动重试。'
+    }
+    state.presenceReconnectTimer = setTimeout(startPresence, 3_000)
+  })
+  socket.addEventListener('error', () => socket.close())
+}
+
+function restartPresence() {
+  const previous = state.presenceSocket
+  state.presenceSocket = null
+  state.presenceConnected = false
+  clearTimeout(state.presenceReconnectTimer)
+  clearInterval(state.presenceHeartbeatTimer)
+  previous?.close(1000, 'device name changed')
+  setTimeout(startPresence, 120)
+}
+
+function refreshPresenceDesktops() {
+  if (!state.presenceConnected) {
+    startPresence()
+    return
+  }
+  try {
+    sendPresence({ kind: 'presence.desktop.list.request' })
+  } catch (error) {
+    showToast(error.message)
+  }
+}
+
+async function connect() {
+  startPresence()
+  clearTimeout(state.reconnectTimer)
+  if (!credentialsComplete) {
+    elements.setupView.hidden = false
+    elements.deviceView.hidden = true
+    renderDesktopDiscovery()
+    return
+  }
+  elements.setupView.classList.remove('discovery-mode')
+  elements.discoveryControls.hidden = true
+  elements.connectButton.hidden = false
   try {
     state.cryptoKey = await crypto.subtle.importKey('raw', base64UrlToBytes(credentials.key), 'AES-GCM', false, ['encrypt', 'decrypt'])
   } catch {
@@ -306,7 +789,12 @@ function handleRemoteMessage(message) {
       }
       break
     case 'session.resumed':
-      if (state.currentSession?.id === message.sessionId) setConversationState('已继续会话')
+      if (
+        state.currentSession?.id === message.sessionId
+        && elements.conversationState.textContent.startsWith('正在读取历史')
+      ) {
+        setConversationState('会话已继续，正在读取历史', true)
+      }
       break
     case 'session.history.result':
       renderHistory(message.payload)
@@ -321,8 +809,7 @@ function handleRemoteMessage(message) {
       ensureAssistantMessage()
       break
     case 'response.delta':
-      ensureAssistantMessage().textContent += message.payload.delta || ''
-      scrollMessages()
+      appendMessageText(ensureAssistantMessage(), message.payload.delta || '')
       break
     case 'reasoning.delta':
       setConversationState('Codex 正在思考', true)
@@ -908,6 +1395,7 @@ function createSessionRow(session) {
     const button = document.createElement('button')
     button.type = 'button'
     button.className = `session-row${session.canContinue === false ? ' view-only' : ''}`
+    button.dataset.sessionId = session.id
     const symbol = document.createElement('span')
     symbol.className = 'session-symbol'
     symbol.append(icon(session.archived ? 'archive' : 'task'))
@@ -1116,6 +1604,7 @@ async function loadProjectSessions(projectId) {
 
 async function openSession(session, loadHistory) {
   state.currentSession = session
+  elements.conversationView.dataset.sessionId = session.id
   state.currentTurnId = null
   state.pendingAssistant = null
   state.capabilities.composer = null
@@ -1160,10 +1649,33 @@ function renderHistory(payload) {
 function appendMessage(role, text, pending = false) {
   const message = document.createElement('div')
   message.className = `message ${role}${pending ? ' pending' : ''}`
-  message.textContent = text
+  message.rawText = String(text || '')
+  renderMessageContent(message)
   elements.messageList.append(message)
   scrollMessages()
   return message
+}
+
+function renderMessageContent(message) {
+  if (message.renderTimer) {
+    clearTimeout(message.renderTimer)
+    message.renderTimer = null
+  }
+  if (message.classList.contains('tool')) {
+    message.textContent = message.rawText
+  } else {
+    renderMessageMarkdown(message, message.rawText)
+  }
+}
+
+function appendMessageText(message, delta) {
+  message.rawText = `${message.rawText || ''}${delta}`
+  if (message.renderTimer) return
+  message.renderTimer = setTimeout(() => {
+    message.renderTimer = null
+    renderMessageContent(message)
+    scrollMessages()
+  }, 48)
 }
 
 function ensureAssistantMessage() {
@@ -1185,7 +1697,8 @@ function setGenerating(generating) {
 
 function finishTurn(status) {
   if (state.pendingAssistant) {
-    if (state.pendingAssistant.textContent.trim()) state.pendingAssistant.classList.remove('pending')
+    renderMessageContent(state.pendingAssistant)
+    if (state.pendingAssistant.rawText.trim()) state.pendingAssistant.classList.remove('pending')
     else state.pendingAssistant.remove()
   }
   state.pendingAssistant = null
@@ -1262,6 +1775,25 @@ function showToast(text) {
 
 document.querySelectorAll('.tabs button').forEach((button) => button.addEventListener('click', () => showView(button.dataset.view)))
 elements.connectButton.addEventListener('click', connect)
+elements.mobileDeviceName.value = localStorage.getItem(mobileDeviceNameKey) || defaultMobileDeviceName()
+elements.mobileDeviceName.addEventListener('change', () => {
+  elements.mobileDeviceName.value = currentMobileDeviceName()
+  localStorage.setItem(mobileDeviceNameKey, elements.mobileDeviceName.value)
+  restartPresence()
+})
+elements.refreshDiscoveryButton.addEventListener('click', refreshPresenceDesktops)
+elements.relayPairingCode.addEventListener('input', () => {
+  elements.relayPairingCode.value = elements.relayPairingCode.value.replace(/\D/g, '').slice(0, 6)
+})
+elements.relayPairingCode.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') submitRelayPairingCode()
+})
+elements.submitPairingButton.addEventListener('click', submitRelayPairingCode)
+elements.cancelPairingButton.addEventListener('click', () => closePairingDialog({ notifyDesktop: true }))
+elements.closePairingDialog.addEventListener('click', () => closePairingDialog({ notifyDesktop: true }))
+elements.pairingDialog.addEventListener('click', (event) => {
+  if (event.target === elements.pairingDialog) closePairingDialog({ notifyDesktop: true })
+})
 elements.refreshSessionsButton.addEventListener('click', () => {
   void loadSessions(true).catch((error) => showToast(error.message))
 })
@@ -1342,6 +1874,7 @@ elements.createSessionButton.addEventListener('click', async () => {
 
 elements.backButton.addEventListener('click', () => {
   elements.conversationView.hidden = true
+  delete elements.conversationView.dataset.sessionId
   elements.deviceView.hidden = false
   state.currentSession = null
   showView('sessions')
@@ -1396,7 +1929,8 @@ elements.disconnectButton.addEventListener('click', () => {
   state.socket?.close(1000, 'user disconnected')
   elements.deviceView.hidden = true
   elements.setupView.hidden = false
-  elements.setupMessage.textContent = '当前手机连接已断开。配对信息仍保留在本机浏览器地址中。'
+  elements.setupMessage.textContent = '当前手机连接已断开。配对信息仍安全保留在这个浏览器中。'
+  elements.connectButton.hidden = false
 })
 
 connect()

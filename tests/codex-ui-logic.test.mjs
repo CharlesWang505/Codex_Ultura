@@ -3,6 +3,12 @@ import test from 'node:test'
 import { validateMappings } from '../src/features/codex/hotSwitch/mappingValidation.ts'
 import { setContextEnabled } from '../src/features/codex/context/contextTypes.ts'
 import { removeRelayProfileFromSettings } from '../src/features/codex/providers/providerSettings.ts'
+import {
+  configuredModelNames,
+  normalizeModelImageHandling,
+  parseModelImageHandling,
+  updateModelImageHandling,
+} from '../src/features/codex/providers/modelImageHandling.ts'
 import { normalizeDurationValueMs } from '../src/lib/duration.ts'
 import { buildTimeWindow, DAY_MS } from '../src/lib/timeWindow.ts'
 import { summarizeWorkspacePermissions } from '../src/features/remote-control/workspacePermissions.ts'
@@ -170,4 +176,22 @@ test('removing a provider persists a clean replacement settings shape', () => {
   assert.equal(result.hotSwitchModelMappings[0].relayId, 'relay-b')
   assert.deepEqual(result.hotSwitchModelMappings[0].candidateRelayIds, ['relay-b'])
   assert.deepEqual(result.aggregateRelayProfiles[0].members, [{ relayId: 'relay-b', weight: 1 }])
+})
+
+test('model image handling stores only explicit policies for configured models', () => {
+  const models = 'gpt-5\nclaude-vision\ngpt-5'
+  assert.deepEqual(configuredModelNames(models), ['gpt-5', 'claude-vision'])
+
+  const withVlm = updateModelImageHandling(models, '{}', 'claude-vision', 'vlm')
+  assert.deepEqual(parseModelImageHandling(withVlm), { 'claude-vision': 'vlm' })
+
+  const withStrip = updateModelImageHandling(models, withVlm, 'gpt-5', 'strip')
+  assert.deepEqual(parseModelImageHandling(withStrip), {
+    'claude-vision': 'vlm',
+    'gpt-5': 'strip',
+  })
+  assert.equal(
+    normalizeModelImageHandling('gpt-5', withStrip),
+    JSON.stringify({ 'gpt-5': 'strip' }),
+  )
 })

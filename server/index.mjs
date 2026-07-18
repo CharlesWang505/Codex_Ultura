@@ -6,7 +6,9 @@ import { WebSocket, WebSocketServer } from 'ws'
 import {
   MAX_MESSAGE_BYTES,
   PROTOCOL_VERSION,
+  PresenceRegistry,
   RoomRegistry,
+  validateDesktopPresence,
   validateRelayFrame,
 } from './relay-core.mjs'
 import {
@@ -19,6 +21,7 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), 'web')
 const host = process.env.RELAY_HOST || '127.0.0.1'
 const port = Number(process.env.RELAY_PORT || 4178)
 const registry = new RoomRegistry()
+const presence = new PresenceRegistry()
 const uploads = new EncryptedUploadStore()
 
 const contentTypes = new Map([
@@ -175,6 +178,17 @@ server.on('upgrade', (request, socket, head) => {
 websocketServer.on('connection', (socket) => {
   let connection = null
   const authenticationTimer = setTimeout(() => socket.close(4001, 'authentication timeout'), 10_000)
+  const remoteAddress = socket._socket?.remoteAddress || ''
+
+  const sendJson = (target, value) => {
+    if (target?.socket?.readyState === WebSocket.OPEN) {
+      target.socket.send(JSON.stringify(value))
+    }
+  }
+
+  const broadcast = (targets, value) => {
+    for (const target of targets) sendJson(target, value)
+  }
 
   socket.on('message', (bytes, binary) => {
     if (binary || bytes.length > MAX_MESSAGE_BYTES) {
@@ -189,19 +203,105 @@ websocketServer.on('connection', (socket) => {
       return
     }
     if (!connection) {
-      const authenticated = registry.authenticate(value, socket)
-      if (authenticated.error) {
-        socket.send(JSON.stringify({ kind: 'error', message: authenticated.error }))
+      const result = value.kind === 'presence.mobile.register'
+        ? presence.registerMobile(value, socket, remoteAddress)
+        : registry.authenticate(value, socket)
+      if (result.error) {
+        socket.send(JSON.stringify({ kind: 'error', message: result.error }))
         socket.close(4003, 'authentication failed')
         return
       }
       clearTimeout(authenticationTimer)
-      connection = authenticated.connection
-      socket.send(JSON.stringify({ kind: 'authenticated', protocolVersion: PROTOCOL_VERSION }))
+      connection = result.connection
+      if (connection.channel === 'presence') {
+        socket.send(JSON.stringify({
+          kind: 'presence.registered',
+          protocolVersion: PROTOCOL_VERSION,
+          deviceId: connection.deviceId,
+        }))
+        socket.send(JSON.stringify({
+          kind: 'presence.desktop.list',
+          protocolVersion: PROTOCOL_VERSION,
+          desktops: presence.desktopList(),
+        }))
+        broadcast(presence.desktopConnections(), {
+          protocolVersion: PROTOCOL_VERSION,
+          kind: 'presence.mobile.online',
+          device: presence.mobileStatus(connection),
+        })
+      } else {
+        socket.send(JSON.stringify({ kind: 'authenticated', protocolVersion: PROTOCOL_VERSION }))
+        if (connection.role === 'desktop') {
+          socket.send(JSON.stringify({
+            kind: 'presence.mobile.list',
+            protocolVersion: PROTOCOL_VERSION,
+            devices: presence.mobileList(),
+          }))
+        }
+      }
       return
     }
     if (!connection.limiter.accept()) {
       socket.close(4008, 'rate limit')
+      return
+    }
+    if (connection.channel === 'presence') {
+      if (value.kind === 'presence.mobile.heartbeat') {
+        presence.touchMobile(connection)
+        socket.send(JSON.stringify({ kind: 'ack', messageId: value.messageId || null, delivered: 1 }))
+        return
+      }
+      if (value.kind === 'presence.desktop.list.request') {
+        socket.send(JSON.stringify({
+          kind: 'presence.desktop.list',
+          protocolVersion: PROTOCOL_VERSION,
+          desktops: presence.desktopList(),
+        }))
+        return
+      }
+      if (value.kind.startsWith('pairing.')) {
+        const routed = presence.pairingRoute(value, connection)
+        if (routed.error) {
+          socket.send(JSON.stringify({ kind: 'error', message: routed.error, pairingId: value.pairingId || null }))
+          return
+        }
+        sendJson(routed.target, routed.message)
+        socket.send(JSON.stringify({ kind: 'ack', messageId: value.messageId || null, delivered: 1 }))
+        return
+      }
+      socket.close(1008, 'invalid presence frame')
+      return
+    }
+    if (validateDesktopPresence(value, connection)) {
+      const registered = presence.registerDesktop(connection, value)
+      if (registered.error) {
+        socket.send(JSON.stringify({ kind: 'error', message: registered.error }))
+        return
+      }
+      broadcast(presence.mobileConnections(), {
+        kind: 'presence.desktop.online',
+        protocolVersion: PROTOCOL_VERSION,
+        desktop: registered.status,
+      })
+      socket.send(JSON.stringify({ kind: 'ack', messageId: value.messageId || null, delivered: presence.mobileConnections().length }))
+      return
+    }
+    if (value.kind === 'presence.mobile.list.request' && connection.role === 'desktop') {
+      socket.send(JSON.stringify({
+        kind: 'presence.mobile.list',
+        protocolVersion: PROTOCOL_VERSION,
+        devices: presence.mobileList(),
+      }))
+      return
+    }
+    if (value.kind?.startsWith('pairing.') && connection.role === 'desktop') {
+      const routed = presence.pairingRoute(value, connection)
+      if (routed.error) {
+        socket.send(JSON.stringify({ kind: 'error', message: routed.error, pairingId: value.pairingId || null }))
+        return
+      }
+      sendJson(routed.target, routed.message)
+      socket.send(JSON.stringify({ kind: 'ack', messageId: value.messageId || null, delivered: 1 }))
       return
     }
     if (!validateRelayFrame(value, connection)) {
@@ -221,7 +321,10 @@ websocketServer.on('connection', (socket) => {
 
   socket.on('close', () => {
     clearTimeout(authenticationTimer)
-    if (connection) registry.remove(connection)
+    if (connection) {
+      if (connection.channel === 'room') registry.remove(connection)
+      for (const event of presence.remove(connection)) broadcast(event.recipients, event.message)
+    }
   })
   socket.on('error', () => undefined)
 })

@@ -11,6 +11,16 @@ pub const DEFAULT_MARKET_INDEX_URL: &str =
 pub const MAX_MARKET_MANIFEST_BYTES: usize = 1024 * 1024;
 pub const MAX_MARKET_SCRIPT_BYTES: usize = 2 * 1024 * 1024;
 const ALLOWED_MARKET_HOSTS: &[&str] = &["raw.githubusercontent.com", "gist.githubusercontent.com"];
+const ZHCN_TRANSLATION_ID: &str = "codex-zhcn-translate";
+const ZHCN_TRANSLATION_VERSION: &str = "1.0";
+const ZHCN_TRANSLATION_STALE_URL: &str =
+    "https://raw.githubusercontent.com/hL091015/CodexPlusPlusScriptMarket/main/scripts/zh_CN%E6%B1%89%E5%8C%96.user.js";
+const ZHCN_TRANSLATION_STALE_SHA256: &str =
+    "72214d31d425d1ce936b457aa43fcc40df55f4de3b9b140f9510c7f392cdc845";
+const ZHCN_TRANSLATION_PINNED_URL: &str =
+    "https://raw.githubusercontent.com/hL091015/CodexPlusPlusScriptMarket/0c4ece6b70f8e09599a03ed1d306acea73c3685d/scripts/zh_CN%E6%B1%89%E5%8C%96.user.js";
+const ZHCN_TRANSLATION_PINNED_SHA256: &str =
+    "be19a7930116dfe8fa1c68571d6a3bb3130714f77c7e32a6c1da543a182270f5";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ScriptMarketManifest {
@@ -118,8 +128,24 @@ pub async fn install_market_script(
     manager: &UserScriptManager,
     script: &MarketScript,
 ) -> anyhow::Result<()> {
-    let content = download_script(&script.script_url).await?;
-    install_market_script_content(manager, script, &content)
+    let resolved = resolve_market_script_for_install(script);
+    let content = download_script(&resolved.script_url).await?;
+    install_market_script_content(manager, &resolved, &content)
+}
+
+fn resolve_market_script_for_install(script: &MarketScript) -> MarketScript {
+    if script.id == ZHCN_TRANSLATION_ID
+        && script.version == ZHCN_TRANSLATION_VERSION
+        && script.script_url == ZHCN_TRANSLATION_STALE_URL
+        && script.sha256.eq_ignore_ascii_case(ZHCN_TRANSLATION_STALE_SHA256)
+    {
+        return MarketScript {
+            script_url: ZHCN_TRANSLATION_PINNED_URL.to_string(),
+            sha256: ZHCN_TRANSLATION_PINNED_SHA256.to_string(),
+            ..script.clone()
+        };
+    }
+    script.clone()
 }
 
 fn parse_market_script(raw: Value) -> Option<MarketScript> {
@@ -167,7 +193,11 @@ pub fn validate_market_script_content(script: &MarketScript, content: &[u8]) -> 
     }
     let actual = sha256_hex(content);
     if actual != expected {
-        anyhow::bail!("market script sha256 mismatch");
+        anyhow::bail!(
+            "市场脚本完整性校验失败：下载内容与市场清单不一致，已取消安装（期望 {}，实际 {}）",
+            checksum_prefix(&expected),
+            checksum_prefix(&actual)
+        );
     }
     Ok(())
 }
@@ -222,6 +252,10 @@ fn is_sha256_hex(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+fn checksum_prefix(value: &str) -> &str {
+    value.get(..12).unwrap_or(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,6 +294,45 @@ mod tests {
             validate_market_script_content(&script, &vec![b'a'; MAX_MARKET_SCRIPT_BYTES + 1])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn stale_zhcn_market_entry_uses_a_reviewed_immutable_commit() {
+        let stale = MarketScript {
+            id: ZHCN_TRANSLATION_ID.to_string(),
+            name: "Codex简体中文汉化".to_string(),
+            description: String::new(),
+            version: ZHCN_TRANSLATION_VERSION.to_string(),
+            author: "hL091015".to_string(),
+            tags: vec!["translation".to_string()],
+            homepage: String::new(),
+            script_url: ZHCN_TRANSLATION_STALE_URL.to_string(),
+            sha256: ZHCN_TRANSLATION_STALE_SHA256.to_uppercase(),
+        };
+
+        let resolved = resolve_market_script_for_install(&stale);
+
+        assert_eq!(resolved.script_url, ZHCN_TRANSLATION_PINNED_URL);
+        assert_eq!(resolved.sha256, ZHCN_TRANSLATION_PINNED_SHA256);
+        assert_eq!(resolved.id, stale.id);
+        assert_eq!(resolved.version, stale.version);
+    }
+
+    #[test]
+    fn compatibility_override_requires_the_exact_stale_manifest_entry() {
+        let changed = MarketScript {
+            id: ZHCN_TRANSLATION_ID.to_string(),
+            name: "Codex简体中文汉化".to_string(),
+            description: String::new(),
+            version: "1.1".to_string(),
+            author: "hL091015".to_string(),
+            tags: Vec::new(),
+            homepage: String::new(),
+            script_url: ZHCN_TRANSLATION_STALE_URL.to_string(),
+            sha256: ZHCN_TRANSLATION_STALE_SHA256.to_string(),
+        };
+
+        assert_eq!(resolve_market_script_for_install(&changed), changed);
     }
 }
 

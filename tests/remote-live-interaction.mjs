@@ -30,7 +30,8 @@ const failureScreenshot = path.join(
   tmpdir(),
   'codex-compass-remote-live-137-interaction-failed.png',
 )
-const selectedModel = 'gpt-5.6-luna'
+const preferredModel = 'gpt-5.6-luna'
+let selectedModel = ''
 let selectedSkill = ''
 let result = null
 
@@ -65,6 +66,17 @@ try {
   ))
   assert.ok(workspaceId, 'Codex-Compass workspace is unavailable')
   await page.locator('#workspaceSelect').selectOption(workspaceId)
+  await page.waitForFunction(() => document.querySelectorAll('#modelSelect option').length > 1)
+  const modelOptions = await page.locator('#modelSelect option').evaluateAll((options) => (
+    options
+      .map((option) => ({ value: option.value, label: option.textContent?.trim() || '' }))
+      .filter((option) => option.value)
+  ))
+  const model = modelOptions.find((option) => option.value === preferredModel)
+    || modelOptions.find((option) => option.value.startsWith(`${preferredModel}--cc-`))
+    || modelOptions[0]
+  assert.ok(model, 'no selectable Codex model is available')
+  selectedModel = model.value
   await page.locator('#modelSelect').selectOption(selectedModel)
   await assertEnabled(page.locator('#newAttachmentButton'), 'workspace upload permission was not refreshed')
 
@@ -99,6 +111,8 @@ try {
   await installStreamObserver(page)
   await page.locator('#createSessionButton').click()
   await page.locator('#conversationView').waitFor({ state: 'visible' })
+  const createdSessionId = await page.locator('#conversationView').getAttribute('data-session-id')
+  assert.ok(createdSessionId, 'new remote session id was not exposed to the web client')
   await waitForAssistantText(page, attachmentToken, 120_000)
   await page.locator('#conversationState').filter({ hasText: '任务已完成' }).waitFor({
     timeout: 120_000,
@@ -115,11 +129,13 @@ try {
 
   await page.locator('#backButton').click()
   await page.locator('#deviceView').waitFor({ state: 'visible' })
-  const projectGroup = page.locator('.project-group').filter({
-    has: page.locator('.project-heading strong', { hasText: /^Codex-Compass$/ }),
-  })
-  const matchingSession = projectGroup.locator('.session-row').first()
-  await matchingSession.waitFor({ state: 'visible', timeout: 60_000 })
+  const matchingSession = page.locator(`.session-row[data-session-id="${createdSessionId}"]`)
+  try {
+    await matchingSession.waitFor({ state: 'visible', timeout: 15_000 })
+  } catch {
+    await page.locator('#sessionSearch').fill(createdSessionId)
+    await matchingSession.waitFor({ state: 'visible', timeout: 60_000 })
+  }
   const reopenedSessionTitle = (await matchingSession.locator('strong').textContent())?.trim() || ''
   await matchingSession.click()
   await page.locator('#conversationState').filter({ hasText: '历史已同步' }).waitFor({

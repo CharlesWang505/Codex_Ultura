@@ -324,6 +324,10 @@ pub fn normalize_codex_app_path(path: &Path) -> Option<PathBuf> {
         return None;
     }
 
+    if is_codex_manager_path(path) {
+        return None;
+    }
+
     let file_name = path.file_name().and_then(OsStr::to_str).unwrap_or_default();
     if is_supported_app_executable_name(file_name) {
         return path.parent().map(Path::to_path_buf);
@@ -353,6 +357,37 @@ pub fn normalize_codex_app_path(path: &Path) -> Option<PathBuf> {
     }
 
     None
+}
+
+fn is_codex_manager_path(path: &Path) -> bool {
+    for component in path.components() {
+        let std::path::Component::Normal(name) = component else {
+            continue;
+        };
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let lower = name.to_ascii_lowercase();
+        if lower == "codex++"
+            || lower == "codexplusplus"
+            || lower == "codex-plus-plus"
+            || lower == "codex-compass"
+            || lower == "codex_compass"
+            || lower.contains("codex-plus-manager")
+            || lower.contains("codex compass")
+        {
+            return true;
+        }
+    }
+    let normalized = path
+        .to_string_lossy()
+        .replace('/', "\\")
+        .to_ascii_lowercase();
+    normalized.contains("\\programs\\codex++")
+        || normalized.contains("\\codex++\\")
+        || normalized.ends_with("\\codex++")
+        || normalized.contains("\\codex-compass\\")
+        || normalized.ends_with("\\codex-compass")
 }
 
 pub fn build_codex_executable(app_dir: &Path) -> PathBuf {

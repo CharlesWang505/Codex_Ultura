@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import {
   Check,
   Copy,
@@ -38,27 +39,25 @@ import type {
   WorkspacePermissionPatch,
 } from './types'
 import { RemoteLiveMonitor } from './RemoteLiveMonitor'
+import { RelayPairingPanel } from './RelayPairingPanel'
+import { useLanguage, type AppLanguage } from '../../lib/i18n'
 import {
   summarizeWorkspacePermissions,
   type WorkspacePermissionSelection,
 } from './workspacePermissions'
 import './RemoteControl.css'
 
-const connectionText = {
-  disabled: '已关闭',
-  connecting: '连接中',
-  connected: '已连接',
-  disconnected: '未连接',
+function formatTime(value: number | undefined, language: AppLanguage) {
+  return value
+    ? new Date(value).toLocaleString(language, { hour12: false })
+    : language === 'en-US' ? 'No record' : '尚无记录'
 }
 
-function formatTime(value?: number) {
-  return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '尚无记录'
-}
-
-function formatRemaining(expiresAt?: number) {
-  if (!expiresAt) return '尚未创建'
+function formatRemaining(expiresAt: number | undefined, language: AppLanguage) {
+  if (!expiresAt) return language === 'en-US' ? 'Not created' : '尚未创建'
   const seconds = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000))
-  return seconds > 0 ? `${seconds} 秒后失效` : '已失效'
+  if (seconds <= 0) return language === 'en-US' ? 'Expired' : '已失效'
+  return language === 'en-US' ? `Expires in ${seconds} seconds` : `${seconds} 秒后失效`
 }
 
 type BulkPermissionCheckboxProps = {
@@ -91,6 +90,7 @@ function BulkPermissionCheckbox({
 }
 
 export function RemoteControlPage() {
+  const { language, t } = useLanguage()
   const [snapshot, setSnapshot] = useState<RemoteControlSnapshot>()
   const [pairing, setPairing] = useState<PairingInfo>()
   const [lanInvitation, setLanInvitation] = useState<LanPairingInvitation>()
@@ -98,20 +98,45 @@ export function RemoteControlPage() {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const refreshInFlight = useRef(false)
 
   const refresh = useCallback(async () => {
+    if (refreshInFlight.current) return
+    refreshInFlight.current = true
     try {
       setSnapshot(await getRemoteStatus())
       setError('')
     } catch (reason) {
-      setError(String(reason))
+      setError(t(String(reason)))
+    } finally {
+      refreshInFlight.current = false
     }
-  }, [])
+  }, [t])
 
   useEffect(() => {
+    let disposed = false
+    let removeStatusListener: (() => void) | undefined
     void refresh()
-    const timer = window.setInterval(() => void refresh(), 3000)
-    return () => window.clearInterval(timer)
+    void listen('remote-control-status', () => {
+      if (!disposed) void refresh()
+    }).then((cleanup) => {
+      if (disposed) cleanup()
+      else removeStatusListener = cleanup
+    }).catch(() => undefined)
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refresh()
+    }, 30_000)
+    return () => {
+      disposed = true
+      removeStatusListener?.()
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+      window.clearInterval(timer)
+    }
   }, [refresh])
 
   useEffect(() => {
@@ -142,23 +167,29 @@ export function RemoteControlPage() {
       const value = await operation()
       apply?.(value)
     } catch (reason) {
-      setError(String(reason))
+      setError(t(String(reason)))
     } finally {
       setBusy('')
     }
   }
 
   if (!snapshot) {
-    return <div className="remote-loading">正在读取手机远控状态...</div>
+    return <div className="remote-loading">{t('正在读取手机远控状态...')}</div>
   }
 
   const settings = snapshot.settings
   const lanPairing = snapshot.lanPairing
   const authLabel = snapshot.authType === 'chatgpt'
-    ? 'ChatGPT 官方账号'
+    ? t('ChatGPT 官方账号')
     : snapshot.authType === 'apiKey'
-      ? '本机 API Key'
-      : '尚未检测'
+      ? t('本机 API Key')
+      : t('尚未检测')
+  const connectionText = {
+    disabled: t('已关闭'),
+    connecting: t('连接中'),
+    connected: t('已连接'),
+    disconnected: t('未连接'),
+  }
   const allPermissionSelection = summarizeWorkspacePermissions(
     snapshot.workspaces,
     ['allowWrite', 'allowCommands', 'allowUploads'],
@@ -180,7 +211,9 @@ export function RemoteControlPage() {
       () => updateAllRemoteWorkspacePermissions(permissions),
       (items) => {
         setSnapshot((current) => current ? { ...current, workspaces: items } : current)
-        setNotice(`已为 ${items.length} 个工作区${checked ? '开启' : '关闭'}${label}。`)
+        setNotice(language === 'en-US'
+          ? `${checked ? 'Enabled' : 'Disabled'} ${label} for ${items.length} workspaces.`
+          : `已为 ${items.length} 个工作区${checked ? '开启' : '关闭'}${label}。`)
       },
     )
   }
@@ -189,16 +222,16 @@ export function RemoteControlPage() {
     <div className="remote-page">
       <section className="remote-command-bar">
         <div>
-          <h1>手机远控</h1>
-          <p>网站仅中继端到端加密消息，Codex 认证和任务执行始终留在这台电脑。</p>
+          <h1>{t('手机远控')}</h1>
+          <p>{t('网站仅中继端到端加密消息，Codex 认证和任务执行始终留在这台电脑。')}</p>
         </div>
         <div className="remote-actions">
           <button className="remote-danger" type="button" onClick={() => void run('pause', () => setRemotePaused(!settings.paused), setSnapshot)}>
             {settings.paused ? <Play size={16} /> : <Pause size={16} />}
-            {settings.paused ? '恢复远控' : '立即暂停所有远控'}
+            {settings.paused ? t('恢复远控') : t('立即暂停所有远控')}
           </button>
-          <button type="button" title="重新连接" onClick={() => void run('reconnect', reconnectRemote, setSnapshot)} disabled={busy === 'reconnect'}>
-            <RefreshCw className={busy === 'reconnect' ? 'spin' : ''} size={16} />重新连接
+          <button type="button" title={t('重新连接')} onClick={() => void run('reconnect', reconnectRemote, setSnapshot)} disabled={busy === 'reconnect'}>
+            <RefreshCw className={busy === 'reconnect' ? 'spin' : ''} size={16} />{t('重新连接')}
           </button>
         </div>
       </section>
@@ -207,36 +240,43 @@ export function RemoteControlPage() {
       {notice && <div className="remote-notice">{notice}</div>}
 
       <section className="remote-status-grid">
-        <div><span>远控总开关</span><strong>{settings.enabled ? settings.paused ? '已暂停' : '已开启' : '已关闭'}</strong></div>
-        <div><span>中继连接</span><strong className={`remote-${snapshot.connection}`}>{relayConfigured ? connectionText[snapshot.connection] : '未配置'}</strong></div>
-        <div><span>本机认证</span><strong>{authLabel}</strong></div>
-        <div><span>app-server</span><strong>{snapshot.codexVersion || '连接后检测'}</strong></div>
-        <div><span>授权工作区</span><strong>{snapshot.workspaces.length}</strong></div>
-        <div><span>活跃远程会话</span><strong>{snapshot.activeSessions}</strong></div>
-        <div><span>最近连接</span><strong>{formatTime(snapshot.lastConnectedAt)}</strong></div>
-        <div><span>最近手机活动</span><strong>{formatTime(snapshot.lastMobileAt)}</strong></div>
+        <div><span>{t('远控总开关')}</span><strong>{settings.enabled ? settings.paused ? t('已暂停') : t('已开启') : t('已关闭')}</strong></div>
+        <div><span>{t('中继连接')}</span><strong className={`remote-${snapshot.connection}`}>{relayConfigured ? connectionText[snapshot.connection] : t('未配置')}</strong></div>
+        <div><span>{t('本机认证')}</span><strong>{authLabel}</strong></div>
+        <div><span>app-server</span><strong>{snapshot.codexVersion || t('连接后检测')}</strong></div>
+        <div><span>{t('授权工作区')}</span><strong>{snapshot.workspaces.length}</strong></div>
+        <div><span>{t('活跃远程会话')}</span><strong>{snapshot.activeSessions}</strong></div>
+        <div><span>{t('最近连接')}</span><strong>{formatTime(snapshot.lastConnectedAt, language)}</strong></div>
+        <div><span>{t('最近手机活动')}</span><strong>{formatTime(snapshot.lastMobileAt, language)}</strong></div>
       </section>
 
       <RemoteLiveMonitor />
 
+      <RelayPairingPanel
+        snapshot={snapshot}
+        onSnapshot={setSnapshot}
+        onError={setError}
+        onNotice={setNotice}
+      />
+
       <div className="remote-layout">
         <section className="remote-panel remote-settings">
-          <header><Link2 size={17} /><h2>自建中继与设备</h2><span className="remote-panel-meta">用户自定义</span></header>
+          <header><Link2 size={17} /><h2>{t('自建中继与设备')}</h2><span className="remote-panel-meta">{t('用户自定义')}</span></header>
           <div className="remote-panel-body remote-form">
-            <label className="remote-toggle"><input type="checkbox" checked={settings.enabled} onChange={(event) => setSnapshot({ ...snapshot, settings: { ...settings, enabled: event.target.checked } })} /><span>开启手机远控</span></label>
-            <p className="remote-note">本软件不提供默认公网中继，请填写你自己部署的 Relay 服务。</p>
-            <label><span>中继 WebSocket</span><input autoComplete="off" spellCheck={false} placeholder="wss://relay.example.com/ws" value={settings.relayUrl} onChange={(event) => setSnapshot({ ...snapshot, settings: { ...settings, relayUrl: event.target.value } })} /></label>
-            <label><span>手机网站地址</span><input autoComplete="off" spellCheck={false} placeholder="https://relay.example.com" value={settings.publicWebUrl} onChange={(event) => setSnapshot({ ...snapshot, settings: { ...settings, publicWebUrl: event.target.value } })} /></label>
-            <label><span>设备名称</span><input value={settings.deviceName} onChange={(event) => setSnapshot({ ...snapshot, settings: { ...settings, deviceName: event.target.value } })} /></label>
+            <label className="remote-toggle"><input type="checkbox" checked={settings.enabled} onChange={(event) => setSnapshot({ ...snapshot, settings: { ...settings, enabled: event.target.checked } })} /><span>{t('开启手机远控')}</span></label>
+            <p className="remote-note">{t('本软件不提供默认公网中继，请填写你自己部署的 Relay 服务。')}</p>
+            <label><span>{t('中继 WebSocket')}</span><input autoComplete="off" spellCheck={false} placeholder="wss://relay.example.com/ws" value={settings.relayUrl} onChange={(event) => setSnapshot({ ...snapshot, settings: { ...settings, relayUrl: event.target.value } })} /></label>
+            <label><span>{t('手机网站地址')}</span><input autoComplete="off" spellCheck={false} placeholder="https://relay.example.com" value={settings.publicWebUrl} onChange={(event) => setSnapshot({ ...snapshot, settings: { ...settings, publicWebUrl: event.target.value } })} /></label>
+            <label><span>{t('设备名称')}</span><input value={settings.deviceName} onChange={(event) => setSnapshot({ ...snapshot, settings: { ...settings, deviceName: event.target.value } })} /></label>
             <div className="remote-two-columns">
-              <label><span>心跳（秒）</span><input type="number" min={10} max={120} value={settings.heartbeatSeconds} onChange={(event) => setSnapshot({ ...snapshot, settings: { ...settings, heartbeatSeconds: Number(event.target.value) } })} /></label>
-              <label className="remote-toggle"><input type="checkbox" checked={settings.autoReconnect} onChange={(event) => setSnapshot({ ...snapshot, settings: { ...settings, autoReconnect: event.target.checked } })} /><span>自动重连</span></label>
+              <label><span>{t('心跳（秒）')}</span><input type="number" min={10} max={120} value={settings.heartbeatSeconds} onChange={(event) => setSnapshot({ ...snapshot, settings: { ...settings, heartbeatSeconds: Number(event.target.value) } })} /></label>
+              <label className="remote-toggle"><input type="checkbox" checked={settings.autoReconnect} onChange={(event) => setSnapshot({ ...snapshot, settings: { ...settings, autoReconnect: event.target.checked } })} /><span>{t('自动重连')}</span></label>
             </div>
             <div className="remote-lan-settings">
               <div className="remote-lan-settings-head">
                 <div>
-                  <strong><Wifi size={15} />局域网配对</strong>
-                  <span>仅开放一次性设备绑定，不开放 Codex、8787 或 app-server。</span>
+                  <strong><Wifi size={15} />{t('局域网配对')}</strong>
+                  <span>{t('仅开放一次性设备绑定，不开放 Codex、8787 或 app-server。')}</span>
                 </div>
                 <label className="remote-toggle">
                   <input
@@ -247,12 +287,12 @@ export function RemoteControlPage() {
                       settings: { ...settings, lanPairingEnabled: event.target.checked },
                     })}
                   />
-                  <span>允许同网设备请求</span>
+                  <span>{t('允许同网设备请求')}</span>
                 </label>
               </div>
               <div className="remote-two-columns">
                 <label>
-                  <span>局域网配对端口</span>
+                  <span>{t('局域网配对端口')}</span>
                   <input
                     type="number"
                     min={1024}
@@ -273,37 +313,37 @@ export function RemoteControlPage() {
                       settings: { ...settings, lanAllowTailscale: event.target.checked },
                     })}
                   />
-                  <span>允许 Tailscale 网段</span>
+                  <span>{t('允许 Tailscale 网段')}</span>
                 </label>
               </div>
               <div className="remote-lan-runtime">
                 <span className={`remote-lan-state ${lanPairing.status}`}>
                   <Radio size={12} />
                   {lanPairing.status === 'listening'
-                    ? '正在监听'
+                    ? t('正在监听')
                     : lanPairing.status === 'error'
-                      ? '启动失败'
-                      : '未启用'}
+                      ? t('启动失败')
+                      : t('未启用')}
                 </span>
-                <span>{lanPairing.urls.find((url) => !url.includes('127.0.0.1')) || lanPairing.urls[0] || '保存并开启后显示局域网地址'}</span>
+                <span>{lanPairing.urls.find((url) => !url.includes('127.0.0.1')) || lanPairing.urls[0] || t('保存并开启后显示局域网地址')}</span>
               </div>
-              {lanPairing.lastError && <p className="remote-inline-error">{lanPairing.lastError}</p>}
+              {lanPairing.lastError && <p className="remote-inline-error">{t(lanPairing.lastError)}</p>}
             </div>
-            <label><span>设备 ID</span><input readOnly value={settings.desktopDeviceId} /></label>
+            <label><span>{t('设备 ID')}</span><input readOnly value={settings.desktopDeviceId} /></label>
             <div className="remote-form-actions">
-              <button type="button" onClick={() => void run('save', () => saveRemoteSettings(settings), setSnapshot)} disabled={busy === 'save'}><ShieldCheck size={16} />保存并应用</button>
-              <button type="button" onClick={() => void run('lan-pair', createLanPairing, setLanInvitation)} disabled={lanPairing.status !== 'listening' || busy === 'lan-pair'}><QrCode size={16} />创建局域网邀请</button>
-              <button type="button" onClick={() => void run('pair', getPairingInfo, setPairing)} disabled={!settings.enabled || !relayConfigured}><Smartphone size={16} />生成公网快速链接</button>
+              <button type="button" onClick={() => void run('save', () => saveRemoteSettings(settings), setSnapshot)} disabled={busy === 'save'}><ShieldCheck size={16} />{t('保存并应用')}</button>
+              <button type="button" onClick={() => void run('lan-pair', createLanPairing, setLanInvitation)} disabled={lanPairing.status !== 'listening' || busy === 'lan-pair'}><QrCode size={16} />{t('创建局域网邀请')}</button>
+              <button type="button" onClick={() => void run('pair', getPairingInfo, setPairing)} disabled={!settings.enabled || !relayConfigured}><Smartphone size={16} />{t('生成公网快速链接')}</button>
             </div>
-            {snapshot.lastError && <p className="remote-inline-error">{snapshot.lastError}</p>}
+            {snapshot.lastError && <p className="remote-inline-error">{t(snapshot.lastError)}</p>}
           </div>
         </section>
 
         <section className="remote-panel">
-          <header><FolderPlus size={17} /><h2>工作区白名单</h2></header>
+          <header><FolderPlus size={17} /><h2>{t('工作区白名单')}</h2></header>
           <div className="remote-panel-body remote-form">
             <div className="remote-workspace-toolbar">
-              <p className="remote-note">手机不能输入任意路径。通过 Codex 左侧项目同步工作区，新增项目默认禁止修改、命令和上传。</p>
+              <p className="remote-note">{t('手机不能输入任意路径。通过 Codex 左侧项目同步工作区，新增项目默认禁止修改、命令和上传。')}</p>
               <button
                 type="button"
                 disabled={busy === 'sync-projects'}
@@ -312,63 +352,79 @@ export function RemoteControlPage() {
                   importCodexProjects,
                   (result) => {
                     setSnapshot({ ...snapshot, workspaces: result.workspaces })
-                    setNotice(result.imported > 0
-                      ? `已同步 ${result.imported} 个 Codex 项目，${result.skipped} 个已存在或不可用。`
-                      : `Codex 左侧的 ${result.discovered} 个项目均已同步。`)
+                    setNotice(language === 'en-US'
+                      ? result.imported > 0
+                        ? `Synced ${result.imported} Codex projects; ${result.skipped} already existed or were unavailable.`
+                        : `All ${result.discovered} projects from the Codex sidebar are already synced.`
+                      : result.imported > 0
+                        ? `已同步 ${result.imported} 个 Codex 项目，${result.skipped} 个已存在或不可用。`
+                        : `Codex 左侧的 ${result.discovered} 个项目均已同步。`)
                   },
                 )}
               >
                 <RefreshCw className={busy === 'sync-projects' ? 'spin' : ''} size={16} />
-                一键同步 Codex 项目
+                {t('一键同步 Codex 项目')}
               </button>
             </div>
-            <div className="remote-workspace-bulk" aria-label="批量工作区权限">
-              <strong>一键勾选</strong>
+            <div className="remote-workspace-bulk" aria-label={t('批量工作区权限')}>
+              <strong>{t('一键勾选')}</strong>
               <div>
                 <BulkPermissionCheckbox
-                  label="全部权限"
+                  label={t('全部权限')}
                   selection={allPermissionSelection}
                   disabled={bulkPermissionDisabled}
                   onChange={(checked) => applyBulkPermissions({
                     allowWrite: checked,
                     allowCommands: checked,
                     allowUploads: checked,
-                  }, checked, '全部权限')}
+                  }, checked, language === 'en-US' ? 'all permissions' : '全部权限')}
                 />
                 <BulkPermissionCheckbox
-                  label="修改文件"
+                  label={t('修改文件')}
                   selection={writePermissionSelection}
                   disabled={bulkPermissionDisabled}
-                  onChange={(checked) => applyBulkPermissions({ allowWrite: checked }, checked, '修改文件权限')}
+                  onChange={(checked) => applyBulkPermissions(
+                    { allowWrite: checked },
+                    checked,
+                    language === 'en-US' ? 'file modification' : '修改文件权限',
+                  )}
                 />
                 <BulkPermissionCheckbox
-                  label="运行命令"
+                  label={t('运行命令')}
                   selection={commandPermissionSelection}
                   disabled={bulkPermissionDisabled}
-                  onChange={(checked) => applyBulkPermissions({ allowCommands: checked }, checked, '运行命令权限')}
+                  onChange={(checked) => applyBulkPermissions(
+                    { allowCommands: checked },
+                    checked,
+                    language === 'en-US' ? 'command execution' : '运行命令权限',
+                  )}
                 />
                 <BulkPermissionCheckbox
-                  label="手机上传"
+                  label={t('手机上传')}
                   selection={uploadPermissionSelection}
                   disabled={bulkPermissionDisabled}
-                  onChange={(checked) => applyBulkPermissions({ allowUploads: checked }, checked, '手机上传权限')}
+                  onChange={(checked) => applyBulkPermissions(
+                    { allowUploads: checked },
+                    checked,
+                    language === 'en-US' ? 'mobile uploads' : '手机上传权限',
+                  )}
                 />
               </div>
             </div>
             <div className="remote-workspaces">
-              {snapshot.workspaces.length === 0 && <div className="remote-empty">尚未授权任何工作区</div>}
+              {snapshot.workspaces.length === 0 && <div className="remote-empty">{t('尚未授权任何工作区')}</div>}
               {snapshot.workspaces.map((item) => (
                 <article key={item.id}>
                   <div>
                     <strong>{item.name}</strong>
                     <span>{item.path}</span>
                     <div className="remote-workspace-permissions">
-                      <label><input type="checkbox" checked={item.allowWrite} disabled={permissionBusy} onChange={(event) => void run(`permission-${item.id}`, () => updateRemoteWorkspacePermissions({ ...item, allowWrite: event.target.checked }), (items) => setSnapshot({ ...snapshot, workspaces: items }))} />修改文件</label>
-                      <label><input type="checkbox" checked={item.allowCommands} disabled={permissionBusy} onChange={(event) => void run(`permission-${item.id}`, () => updateRemoteWorkspacePermissions({ ...item, allowCommands: event.target.checked }), (items) => setSnapshot({ ...snapshot, workspaces: items }))} />运行命令</label>
-                      <label><input type="checkbox" checked={item.allowUploads} disabled={permissionBusy} onChange={(event) => void run(`permission-${item.id}`, () => updateRemoteWorkspacePermissions({ ...item, allowUploads: event.target.checked }), (items) => setSnapshot({ ...snapshot, workspaces: items }))} />手机上传</label>
+                      <label><input type="checkbox" checked={item.allowWrite} disabled={permissionBusy} onChange={(event) => void run(`permission-${item.id}`, () => updateRemoteWorkspacePermissions({ ...item, allowWrite: event.target.checked }), (items) => setSnapshot({ ...snapshot, workspaces: items }))} />{t('修改文件')}</label>
+                      <label><input type="checkbox" checked={item.allowCommands} disabled={permissionBusy} onChange={(event) => void run(`permission-${item.id}`, () => updateRemoteWorkspacePermissions({ ...item, allowCommands: event.target.checked }), (items) => setSnapshot({ ...snapshot, workspaces: items }))} />{t('运行命令')}</label>
+                      <label><input type="checkbox" checked={item.allowUploads} disabled={permissionBusy} onChange={(event) => void run(`permission-${item.id}`, () => updateRemoteWorkspacePermissions({ ...item, allowUploads: event.target.checked }), (items) => setSnapshot({ ...snapshot, workspaces: items }))} />{t('手机上传')}</label>
                     </div>
                   </div>
-                  <button type="button" title="撤销工作区" onClick={() => void run(`remove-${item.id}`, () => removeRemoteWorkspace(item.id), (items) => setSnapshot({ ...snapshot, workspaces: items }))}><Trash2 size={15} /></button>
+                  <button type="button" title={t('撤销工作区')} onClick={() => void run(`remove-${item.id}`, () => removeRemoteWorkspace(item.id), (items) => setSnapshot({ ...snapshot, workspaces: items }))}><Trash2 size={15} /></button>
                 </article>
               ))}
             </div>
@@ -378,18 +434,18 @@ export function RemoteControlPage() {
 
       {(lanInvitation || lanPairing.pendingRequests.length > 0 || lanPairing.status === 'listening') && (
         <section className="remote-panel remote-lan-pairing-panel">
-          <header><Wifi size={17} /><h2>局域网设备配对</h2><span className="remote-panel-meta">电脑端最终确认</span></header>
+          <header><Wifi size={17} /><h2>{t('局域网设备配对')}</h2><span className="remote-panel-meta">{t('电脑端最终确认')}</span></header>
           <div className="remote-panel-body remote-lan-pairing-layout">
             <div className="remote-lan-invitation">
               <div className="remote-lan-section-head">
                 <div>
-                  <strong>电脑邀请手机</strong>
-                  <span>扫描二维码，或在局域网页中输入六位码。</span>
+                  <strong>{t('电脑邀请手机')}</strong>
+                  <span>{t('扫描二维码，或在局域网页中输入六位码。')}</span>
                 </div>
                 {lanInvitation && (
                   <button
                     type="button"
-                    title="取消当前邀请"
+                    title={t('取消当前邀请')}
                     onClick={() => void run('cancel-lan-pair', cancelLanPairing, (value) => {
                       setSnapshot(value)
                       setLanInvitation(undefined)
@@ -402,31 +458,31 @@ export function RemoteControlPage() {
               {lanInvitation ? (
                 <div className="remote-lan-invitation-body">
                   <div className="remote-lan-qr">
-                    {lanQrCode ? <img src={lanQrCode} alt="局域网配对二维码" /> : <span>正在生成二维码</span>}
+                    {lanQrCode ? <img src={lanQrCode} alt={t('局域网配对二维码')} /> : <span>{t('正在生成二维码')}</span>}
                   </div>
                   <div className="remote-lan-code">
-                    <span>一次性配对码</span>
+                    <span>{t('一次性配对码')}</span>
                     <strong>{lanInvitation.code}</strong>
-                    <em>{formatRemaining(lanInvitation.expiresAt)}</em>
+                    <em>{formatRemaining(lanInvitation.expiresAt, language)}</em>
                     <button type="button" onClick={() => void navigator.clipboard.writeText(lanInvitation.pairingUrls[0])}>
-                      <Copy size={15} />复制邀请链接
+                      <Copy size={15} />{t('复制邀请链接')}
                     </button>
                   </div>
                 </div>
               ) : (
                 <div className="remote-lan-empty-action">
-                  <span>尚未创建电脑邀请。手机也可以直接打开下方局域网地址发起请求。</span>
+                  <span>{t('尚未创建电脑邀请。手机也可以直接打开下方局域网地址发起请求。')}</span>
                   <button type="button" onClick={() => void run('lan-pair', createLanPairing, setLanInvitation)}>
-                    <QrCode size={15} />创建两分钟邀请
+                    <QrCode size={15} />{t('创建两分钟邀请')}
                   </button>
                 </div>
               )}
               <div className="remote-lan-urls">
-                <strong>手机主动请求地址</strong>
+                <strong>{t('手机主动请求地址')}</strong>
                 {lanPairing.urls.map((url) => (
                   <div key={url}>
                     <span>{url}</span>
-                    <button type="button" title="复制地址" onClick={() => void navigator.clipboard.writeText(url)}>
+                    <button type="button" title={t('复制地址')} onClick={() => void navigator.clipboard.writeText(url)}>
                       <Copy size={14} />
                     </button>
                   </div>
@@ -437,33 +493,33 @@ export function RemoteControlPage() {
             <div className="remote-lan-requests">
               <div className="remote-lan-section-head">
                 <div>
-                  <strong>等待电脑确认</strong>
-                  <span>手机和电脑显示的校验码必须完全一致。</span>
+                  <strong>{t('等待电脑确认')}</strong>
+                  <span>{t('手机和电脑显示的校验码必须完全一致。')}</span>
                 </div>
                 <b>{lanPairing.pendingRequests.length}</b>
               </div>
               {lanPairing.pendingRequests.length === 0 ? (
-                <div className="remote-empty">尚无手机配对请求</div>
+                <div className="remote-empty">{t('尚无手机配对请求')}</div>
               ) : lanPairing.pendingRequests.map((request) => (
                 <article key={request.requestId}>
                   <div className="remote-lan-request-main">
                     <div>
                       <strong>{request.deviceName}</strong>
                       <span>{request.platform} · {request.remoteAddress}</span>
-                      <small title={request.browser}>{request.mode === 'direct' ? '手机主动请求' : '电脑邀请'} · {formatTime(request.requestedAt)}</small>
+                      <small title={request.browser}>{request.mode === 'direct' ? t('手机主动请求') : t('电脑邀请')} · {formatTime(request.requestedAt, language)}</small>
                     </div>
                     <div className="remote-lan-verification">
-                      <span>双端校验码</span>
+                      <span>{t('双端校验码')}</span>
                       <strong>{request.verificationCode}</strong>
-                      <em>{formatRemaining(request.expiresAt)}</em>
+                      <em>{formatRemaining(request.expiresAt, language)}</em>
                     </div>
                   </div>
                   <div className="remote-lan-request-actions">
                     <button type="button" className="remote-reject" onClick={() => void run(`reject-${request.requestId}`, () => rejectLanPairing(request.requestId), setSnapshot)}>
-                      <X size={15} />拒绝
+                      <X size={15} />{t('拒绝')}
                     </button>
                     <button type="button" className="remote-approve" onClick={() => void run(`approve-${request.requestId}`, () => approveLanPairing(request.requestId), setSnapshot)}>
-                      <Check size={15} />确认并允许
+                      <Check size={15} />{t('确认并允许')}
                     </button>
                   </div>
                 </article>
@@ -476,11 +532,11 @@ export function RemoteControlPage() {
       {pairing && (
         <section className="remote-pairing">
           <div>
-            <h2>公网快速链接</h2>
-            <p>用于已部署的 HTTPS 网站。长期凭据只存在 URL 片段中，不会随 HTTP 请求发送给中继服务器。</p>
+            <h2>{t('公网快速链接')}</h2>
+            <p>{t('用于已部署的 HTTPS 网站。长期凭据只存在 URL 片段中，不会随 HTTP 请求发送给中继服务器。')}</p>
           </div>
           <input readOnly value={pairing.pairingUrl} />
-          <button type="button" onClick={() => void navigator.clipboard.writeText(pairing.pairingUrl)}><Copy size={16} />复制配对链接</button>
+          <button type="button" onClick={() => void navigator.clipboard.writeText(pairing.pairingUrl)}><Copy size={16} />{t('复制配对链接')}</button>
         </section>
       )}
     </div>

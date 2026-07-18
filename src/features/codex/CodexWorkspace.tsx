@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   CircleAlert,
@@ -25,6 +25,12 @@ import { ToolsPluginsPage } from './context/ToolsPluginsPage'
 import type { ContextDraft } from './context/contextTypes'
 import { HotSwitchPage } from './hotSwitch/HotSwitchPage'
 import { AggregateRelayEditor } from './providers/AggregateRelayEditor'
+import {
+  configuredModelNames,
+  normalizeModelImageHandling,
+  parseModelImageHandling,
+  updateModelImageHandling,
+} from './providers/modelImageHandling'
 import { removeRelayProfileFromSettings } from './providers/providerSettings'
 import { ScriptMarketPage } from './scripts/ScriptMarketPage'
 import { SessionsPage } from './sessions/SessionsPage'
@@ -61,11 +67,14 @@ import type {
 } from './types'
 import './CodexWorkspace.css'
 
+const ThemeStudioPage = lazy(() => import('./themes/ThemeStudioPage').then((module) => ({ default: module.ThemeStudioPage })))
+
 export type CodexSection =
   | '概览'
   | '供应商配置'
   | '热切换'
   | '会话管理'
+  | '主题工坊'
   | '工具与插件'
   | 'Codex增强'
   | '脚本市场'
@@ -76,6 +85,17 @@ type Props = {
 }
 
 type Notice = { tone: 'ok' | 'warning' | 'error' | 'info'; text: string }
+
+type RelayEnvironmentReport = {
+  clashVergeTun: { enabled: boolean; configPath: string | null }
+  proxyEnvironment: { variables: Array<{ name: string; source: 'process' | 'user' | 'system' }> }
+  codexEnvFile: { exists: boolean; path: string }
+}
+
+type EnvConflictsResult = CommandResult<{
+  conflicts: Array<{ name: string; source: string; valuePresent: boolean }>
+  environment: RelayEnvironmentReport
+}>
 
 const EMPTY_CONTEXT: CodexContextEntries = { mcpServers: [], skills: [], plugins: [] }
 
@@ -126,6 +146,11 @@ function blankProfile(): RelayProfile {
     modelInsertMode: 'patch',
     modelList: '',
     modelWindows: '',
+    modelVlm: '{}',
+    vlmApiKey: '',
+    vlmApiKeySaved: false,
+    vlmModel: '',
+    vlmBaseUrl: '',
     userAgent: '',
     reasoningDialect: 'inherit',
   }
@@ -162,7 +187,7 @@ export function CodexWorkspace({ section }: Props) {
   const [relayFiles, setRelayFiles] = useState<CommandResult<{ configPath: string; authPath: string; configContents: string; authContents: string }> | null>(null)
   const [ccsProviders, setCcsProviders] = useState<CommandResult<{ dbPath: string; providers: Array<{ sourceId: string; name: string; baseUrl: string }> }> | null>(null)
   const [pendingImport, setPendingImport] = useState<CommandResult<{ pending: { name: string; baseUrl: string } | null }> | null>(null)
-  const [envConflicts, setEnvConflicts] = useState<CommandResult<{ conflicts: Array<{ name: string; source: string; valuePresent: boolean }> }> | null>(null)
+  const [envConflicts, setEnvConflicts] = useState<EnvConflictsResult | null>(null)
 
   const run = useCallback(async <T,>(key: string, operation: () => Promise<T>) => {
     activeOperations.current.push(key)
@@ -270,6 +295,15 @@ export function CodexWorkspace({ section }: Props) {
     [selectedProfile, settings],
   )
   const selectedProfileReady = selectedProfile?.relayMode !== 'aggregate' || Boolean(selectedAggregateProfile?.members.length)
+  const configuredModels = useMemo(
+    () => configuredModelNames(selectedProfile?.modelList ?? ''),
+    [selectedProfile?.modelList],
+  )
+  const modelImageHandling = useMemo(
+    () => parseModelImageHandling(selectedProfile?.modelVlm),
+    [selectedProfile?.modelVlm],
+  )
+  const usesVlm = configuredModels.some((model) => modelImageHandling[model] === 'vlm')
 
   const saveSettings = useCallback(async (next: BackendSettings, message = true) => {
     if (!tauri) return null
@@ -875,7 +909,20 @@ export function CodexWorkspace({ section }: Props) {
                       <Field label="测试模型" hint="留空时使用默认模型。"><input value={selectedProfile.testModel} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ testModel: event.target.value })} /></Field>
                       <Field label="上下文窗口"><input value={selectedProfile.contextWindow} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ contextWindow: event.target.value })} placeholder="例如 200000" /></Field>
                       <Field label="自动压缩阈值"><input value={selectedProfile.autoCompactLimit} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ autoCompactLimit: event.target.value })} placeholder="留空为自动" /></Field>
-                      <Field label="模型列表" hint="通常由“获取模型”自动填写；每行一个模型。" wide><textarea rows={6} value={selectedProfile.modelList} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ modelList: event.target.value })} /></Field>
+                      <Field label="模型列表" hint="通常由“获取模型”自动填写；每行一个模型。" wide><textarea rows={6} value={selectedProfile.modelList} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ modelList: event.target.value, modelVlm: normalizeModelImageHandling(event.target.value, selectedProfile.modelVlm) })} /></Field>
+                      <div className="codex-field wide">
+                        <span>模型图片策略</span>
+                        <em>按模型决定图片原样发送、剥离，或先交给视觉模型分析。</em>
+                        {configuredModels.length ? <div className="codex-model-image-list">
+                          {configuredModels.map((model) => <label key={model}><strong>{model}</strong><select value={modelImageHandling[model] ?? 'send-as-is'} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ modelVlm: updateModelImageHandling(selectedProfile.modelList, selectedProfile.modelVlm, model, event.target.value as 'send-as-is' | 'strip' | 'vlm') })}><option value="send-as-is">原样发送</option><option value="strip">剥离图片</option><option value="vlm">VLM 分析</option></select></label>)}
+                        </div> : <small className="codex-model-image-empty">获取或填写模型后可配置图片策略。</small>}
+                      </div>
+                      {usesVlm ? <>
+                        <Field label="VLM API Key" hint={selectedProfile.vlmApiKeySaved && selectedProfile.vlmApiKey === undefined ? 'Key 已由 Windows DPAPI 加密保存；输入新值可替换。' : '单独加密保存，不写入 settings.json。'}><input type="password" value={selectedProfile.vlmApiKey ?? ''} placeholder={selectedProfile.vlmApiKeySaved ? '已保存' : 'sk-...'} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ vlmApiKey: event.target.value, vlmApiKeySaved: Boolean(event.target.value) })} /></Field>
+                        <Field label="VLM 模型"><input value={selectedProfile.vlmModel ?? ''} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ vlmModel: event.target.value })} placeholder="例如 qwen-vl-plus" /></Field>
+                        <Field label="VLM Base URL" wide><input value={selectedProfile.vlmBaseUrl ?? ''} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ vlmBaseUrl: event.target.value })} placeholder="https://example.com/v1" /></Field>
+                        {!selectedProfile.vlmApiKeySaved || !(selectedProfile.vlmModel ?? '').trim() || !(selectedProfile.vlmBaseUrl ?? '').trim() ? <div className="codex-vlm-warning wide"><CircleAlert size={15} />VLM 配置不完整时会保留原图，不会静默丢失图片。</div> : null}
+                      </> : null}
                       <Field label="自定义 User-Agent" hint="中转站没有特殊要求时保持为空。" wide><input value={selectedProfile.userAgent} disabled={settings.hotSwitchEnabled} onChange={(event) => patchProfile({ userAgent: event.target.value })} /></Field>
                     </div>
                   </details> : null}
@@ -909,6 +956,12 @@ export function CodexWorkspace({ section }: Props) {
                   <p className="codex-provider-maintenance-hint">仅当你在软件外修改过 Codex 的 config.toml 或 auth.json 时使用“读取当前 Codex 配置”；它会回填到当前供应商，不会自动应用其他供应商。</p>
                   {pendingImport?.pending ? <div className="codex-pending-import"><div><strong>待导入：{pendingImport.pending.name}</strong><span>{pendingImport.pending.baseUrl}</span></div><div><button type="button" onClick={() => void resolvePendingImport(true)}>确认</button><button type="button" className="danger" onClick={() => void resolvePendingImport(false)}>忽略</button></div></div> : null}
                   {envConflicts?.conflicts.length ? <div className="codex-tag-cloud">{envConflicts.conflicts.map((conflict) => <span key={`${conflict.source}-${conflict.name}`}>{conflict.name} · {conflict.source}</span>)}</div> : null}
+                  {envConflicts?.environment ? <div className="codex-check-list codex-environment-checks">
+                    <div><StatusPill ok={!envConflicts.environment.clashVergeTun.enabled}>Clash Verge TUN</StatusPill><span>{envConflicts.environment.clashVergeTun.enabled ? `已启用${envConflicts.environment.clashVergeTun.configPath ? ` · ${envConflicts.environment.clashVergeTun.configPath}` : ''}` : '未检测到启用状态'}</span></div>
+                    <div><StatusPill ok={!envConflicts.environment.proxyEnvironment.variables.length}>代理环境变量</StatusPill><span>{envConflicts.environment.proxyEnvironment.variables.length ? envConflicts.environment.proxyEnvironment.variables.map((variable) => `${variable.name} · ${variable.source}`).join('，') : '未检测到'}</span></div>
+                    <div><StatusPill ok={!envConflicts.environment.codexEnvFile.exists}>Codex .env</StatusPill><span>{envConflicts.environment.codexEnvFile.exists ? `已存在 · ${envConflicts.environment.codexEnvFile.path}` : '未检测到'}</span></div>
+                  </div> : null}
+                  {envConflicts?.environment ? <p className="codex-provider-maintenance-hint">TUN、代理变量和 .env 仅作只读提示，不会被“移除环境变量冲突”自动删除。</p> : null}
                   {relayFiles ? <details className="codex-raw-files"><summary>原始 config.toml / auth.json（包含敏感信息）</summary><div className="codex-form-grid"><Field label={`config.toml · ${relayFiles.configPath}`} wide><textarea rows={12} value={relayFiles.configContents} onChange={(event) => setRelayFiles((current) => current ? { ...current, configContents: event.target.value } : current)} /></Field><LoadingButton busy={busy === 'save-relay-config'} onClick={() => void saveRelayFile('config')}><Save size={14} />保存 config.toml</LoadingButton><Field label={`auth.json · ${relayFiles.authPath}`} wide><textarea rows={8} value={relayFiles.authContents} onChange={(event) => setRelayFiles((current) => current ? { ...current, authContents: event.target.value } : current)} /></Field><LoadingButton busy={busy === 'save-relay-auth'} onClick={() => void saveRelayFile('auth')}><Save size={14} />保存 auth.json</LoadingButton></div></details> : null}
                   </div>
                 </details>
@@ -939,6 +992,12 @@ export function CodexWorkspace({ section }: Props) {
       ) : null}
 
       {section === '会话管理' ? <SessionsPage settings={settings} onSettingsChange={setSettings} /> : null}
+
+      {section === '主题工坊' ? (
+        <Suspense fallback={<div className="codex-loading-state">正在加载 Codex 主题工坊…</div>}>
+          <ThemeStudioPage />
+        </Suspense>
+      ) : null}
 
       {section === '工具与插件' ? (
         <ToolsPluginsPage

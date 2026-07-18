@@ -51,6 +51,7 @@ export type RemoteControlSnapshot = {
   lastError?: string
   activeSessions: number
   lanPairing: LanPairingSnapshot
+  relayPairing: RelayPairingSnapshot
 }
 
 export type PairingInfo = {
@@ -86,6 +87,41 @@ export type LanPairingSnapshot = {
     expiresAt: number
   }
   pendingRequests: PendingLanPairing[]
+}
+
+export type OnlineRelayMobile = {
+  deviceId: string
+  deviceName: string
+  browser: string
+  platform: string
+  connectedAt: number
+  lastSeenAt: number
+}
+
+export type PendingRelayPairing = {
+  pairingId: string
+  remoteDeviceId: string
+  deviceName: string
+  browser: string
+  platform: string
+  mode: 'desktop_invite' | 'mobile_request' | string
+  code: string
+  requestedAt: number
+  expiresAt: number
+}
+
+export type RelayPairingSnapshot = {
+  onlineMobiles: OnlineRelayMobile[]
+  pendingRequests: PendingRelayPairing[]
+  lastError?: string
+}
+
+export type RelayPairingInvitation = {
+  pairingId: string
+  remoteDeviceId: string
+  deviceName: string
+  code: string
+  expiresAt: number
 }
 
 export type RemoteMonitorMessage = {

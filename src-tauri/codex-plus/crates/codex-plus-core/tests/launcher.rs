@@ -360,6 +360,23 @@ fn app_paths_normalizes_chatgpt_desktop_executable_and_builds_it() {
 }
 
 #[test]
+fn app_paths_rejects_manager_install_dirs_as_codex_apps() {
+    let temp = tempfile::tempdir().unwrap();
+    for name in ["Codex++", "Codex-Compass"] {
+        let manager = temp.path().join("Programs").join(name);
+        std::fs::create_dir_all(&manager).unwrap();
+        std::fs::write(manager.join("Codex.exe"), "").unwrap();
+
+        assert_eq!(normalize_codex_app_path(&manager), None);
+        assert_eq!(normalize_codex_app_path(&manager.join("Codex.exe")), None);
+        assert_ne!(
+            resolve_codex_app_dir_with_saved(None, Some(&manager.to_string_lossy())).as_deref(),
+            Some(manager.as_path())
+        );
+    }
+}
+
+#[test]
 fn app_paths_saved_path_is_used_when_no_explicit_path_is_provided() {
     let temp = tempfile::tempdir().unwrap();
     let app = temp.path().join("Codex.app");
@@ -1272,6 +1289,11 @@ async fn launch_starts_helper_when_chat_protocol_proxy_is_enabled() {
             model_insert_mode: codex_plus_core::settings::RelayModelInsertMode::default(),
             model_list: String::new(),
             model_windows: String::new(),
+            model_vlm: String::new(),
+            vlm_api_key: String::new(),
+            vlm_api_key_saved: false,
+            vlm_model: String::new(),
+            vlm_base_url: String::new(),
             user_agent: String::new(),
             reasoning_dialect: Default::default(),
         }],

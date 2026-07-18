@@ -49,8 +49,12 @@ fn injection_script_prefixes_helper_url_and_version() {
     assert!(!script.contains("window.__CODEX_PLUS_SPONSOR_IMAGES__"));
     assert!(script.contains("window.__CODEX_PLUS_VERSION__"));
     assert!(script.contains(codex_plus_core::version::VERSION));
-    assert!(script.contains("https://discord.gg/y96kX7A76v"));
-    assert!(script.contains("data-codex-plus-discord"));
+    assert!(script.contains("https://github.com/BigPizzaV3/CodexPlusPlus"));
+    assert!(script.contains("https://github.com/BigPizzaV3/CodexPlusPlus/issues"));
+    assert!(!script.contains("discord.gg/y96kX7A76v"));
+    assert!(!script.contains("t.me/CodexPlusPlus"));
+    assert!(!script.contains("data-codex-plus-discord"));
+    assert!(!script.contains("data-codex-plus-telegram"));
 }
 
 #[test]
@@ -462,7 +466,7 @@ fn injection_script_loads_backend_settings_before_initial_scan() {
         .expect("script should load backend settings on startup");
     let footer = &script[startup_call..];
     let initial_scan = footer
-        .find("scan();")
+        .find("scan(true);")
         .expect("script should perform an initial scan");
     let footer_marker = footer
         .find("window.__codexProjectMoveApplyProjection")
@@ -497,9 +501,10 @@ fn injection_script_exposes_sidebar_thread_id_badge_control() {
     assert!(script.contains("data-codex-thread-id-badge-wrap=\"true\""));
     assert!(script.contains("let threadIdBadgeActive = false"));
     assert!(script.contains("if (threadIdBadgeActive)"));
-    assert!(script.contains("function refreshThreadIdBadges()"));
+    assert!(script.contains("function refreshThreadIdBadges(rows = null)"));
     assert!(script.contains("uuidV7TimestampMs(sessionId)"));
-    assert!(script.contains("refreshThreadIdBadges();"));
+    assert!(script.contains("refreshThreadIdBadges(changedSessionRows);"));
+    assert!(script.contains("sessionRowsFromMutations("));
 }
 
 #[test]
@@ -522,22 +527,27 @@ fn injection_script_moves_export_and_project_move_into_more_menu() {
     assert!(script.contains("createSessionMoreMenuItem(\"导出\""));
     assert!(script.contains("createSessionMoreMenuItem(\"移动\""));
     assert!(script.contains("group.appendChild(moreButton)"));
-    assert!(script.contains("installMoreButtonEvents(row, moreButton, openMoreMenu)"));
-    assert!(script.contains("installSessionMoreMenuAutoClose(row, moreMenu)"));
-    assert!(script.contains("updateSessionMoreMenuDirection(moreButton, moreMenu)"));
-    assert!(script.contains("positionSessionMoreMenu(moreButton, moreMenu)"));
-    assert!(script.contains("document.body.appendChild(moreMenu)"));
+    assert!(script.contains("sharedMoreMenuId = \"codex-session-more-menu-shared\""));
+    assert!(script.contains("function installSessionActionEventDelegation()"));
+    assert!(script.contains("installSessionActionEventDelegation();"));
+    assert!(script.contains("openSharedSessionMoreMenu(row, button)"));
+    assert!(script.contains("function ensureSharedSessionMoreMenu()"));
+    assert!(script.contains("menu.id = sharedMoreMenuId"));
+    assert!(script.contains("updateSessionMoreMenuDirection(button, menu)"));
+    assert!(script.contains("positionSessionMoreMenu(button, menu)"));
+    assert!(script.contains("document.body.appendChild(menu)"));
     assert!(script.contains("position: fixed;"));
     assert!(script.contains("codex-session-more-menu-open-up"));
     assert!(script.contains("transform: translateY(calc(-100% - 34px));"));
-    assert!(script.contains("positionSessionMoreMenu(moreButton, moreMenu);"));
-    assert!(script.contains("row.classList.toggle(\"codex-session-more-open\""));
+    assert!(script.contains("positionSessionMoreMenu(button, menu);"));
+    assert!(script.contains("row.classList.add(\"codex-session-more-open\")"));
     assert!(script.contains(".${actionGroupClass} {"));
     assert!(script.contains("position: absolute;"));
     assert!(script.contains("pointer-events: none;"));
     assert!(script.contains("[data-codex-delete-row=\"true\"]:hover .${actionGroupClass} {\n        opacity: 1;\n        pointer-events: auto;\n      }"));
     assert!(script.contains("[data-codex-delete-row=\"true\"].codex-session-more-open .${actionGroupClass} {\n        opacity: 1;\n        pointer-events: auto;\n        z-index: 2147483201;"));
     assert!(!script.contains("installActionButtonEvents(row, moreButton, openMoreMenu)"));
+    assert!(!script.contains("installMoreButtonEvents(row, moreButton, openMoreMenu)"));
     assert!(!script.contains("group.appendChild(exportButton)"));
     assert!(!script.contains("group.appendChild(moveButton)"));
 }
@@ -593,6 +603,9 @@ fn injection_script_exposes_fast_service_tier_control() {
     assert!(script.contains("codexServiceTierSupportedFastModels"));
     assert!(script.contains("\"gpt-5.4\""));
     assert!(script.contains("\"gpt-5.5\""));
+    assert!(script.contains("\"gpt-5.6-sol\""));
+    assert!(script.contains("\"gpt-5.6-terra\""));
+    assert!(script.contains("\"gpt-5.6-luna\""));
     assert!(script.contains("codexServiceTierFastSupportedForModel"));
     assert!(script.contains("codexServiceTierModelForRequest"));
     assert!(script.contains("codexServiceTierMaybeLoadModelCatalog"));
@@ -620,7 +633,8 @@ fn injection_script_exposes_fast_service_tier_control() {
     assert!(script.contains("codexServiceTierDefaultModeForControlMode"));
     assert!(script.contains("normalizeCodexServiceTierControlMode(state.mode) !== \"custom\""));
     assert!(script.contains("state.draft = null"));
-    assert!(script.contains("后端未连接，无法切换服务模式"));
+    assert!(!script.contains("后端未连接，无法切换服务模式"));
+    assert!(script.contains("const fastDisabled = !featureEnabled || codexServiceTierState.status === \"loading\""));
     assert!(script.contains("未连接"));
     assert!(script.contains("thread/start"));
     assert!(script.contains("thread/resume"));
@@ -639,6 +653,11 @@ fn injection_script_exposes_fast_service_tier_control() {
     assert!(script.contains("codexServiceTierBestComposerFooter"));
     assert!(script.contains("codexServiceTierComposerCandidates"));
     assert!(script.contains("codexServiceTierComposerScore"));
+    assert!(script.contains("data-codex-intelligence-trigger"));
+    assert!(script.contains("codexServiceTierModelButtonText"));
+    assert!(script.contains("installCodexServiceTierModelObserver"));
+    assert!(script.contains("characterData: true"));
+    assert!(script.contains("data-selected-reasoning-effort"));
     assert!(script.contains("data-codex-service-tier-badge"));
     assert!(script.contains("codexServiceTierBadgeWired"));
     assert!(script.contains("setAttribute(\"role\", \"button\")"));
@@ -695,9 +714,24 @@ fn injection_script_applies_fast_service_tier_contract() {
 
     assert_eq!(cases["supportedFast"]["serviceTier"], "priority");
     assert_eq!(cases["supportedFast"]["service_tier"], "priority");
+    assert_eq!(cases["localizedSolAvailability"]["supported"], true);
+    assert_eq!(
+        cases["localizedSolAvailability"]["modelName"],
+        "gpt-5.6-sol--cc-default"
+    );
+    assert_eq!(cases["localizedSolFast"]["serviceTier"], "priority");
+    assert_eq!(cases["suffixedTerraFast"]["serviceTier"], "priority");
+    assert_eq!(cases["visibleModelButtonText"], "5.6 Sol · 豆芽 高");
+    assert_eq!(cases["staleCatalogModel"], "");
+    assert_eq!(cases["staleCatalogAvailability"]["supported"], false);
+    assert_eq!(cases["compactVariantAvailability"]["supported"], false);
 
     assert_eq!(
         cases["unsupportedModel"]["serviceTier"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        cases["compactSolModel"]["serviceTier"],
         serde_json::Value::Null
     );
     assert_eq!(
@@ -815,9 +849,86 @@ const startConversation = api.requestOverride({{
   model: "gpt-5.5",
 }});
 
+api.setModelCatalog({{
+  status: "ok",
+  model: "codex-auto-review",
+  default_model: "codex-auto-review",
+  models: ["codex-auto-review", "gpt-5.6-sol--cc-default", "gpt-5.6-terra--cc-relay_a"],
+  model_descriptors: [{{
+    model: "gpt-5.6-sol--cc-default",
+    id: "gpt-5.6-sol--cc-default",
+    slug: "gpt-5.6-sol--cc-default",
+    displayName: "gpt-5.6-sol · 豆芽",
+  }}],
+}});
+api.setCurrentModelLabel("5.6 Sol · 豆芽 高");
+const localizedSolAvailability = api.fastAvailability();
+const localizedSolFast = api.applyServiceTierOverride("turn/start", {{
+  threadId: "thread-12345678",
+  service_tier: null,
+}}, "");
+
+const visibleModelButtonText = api.modelButtonText({{
+  cloneNode() {{
+    const visibleRoot = {{
+      textContent: "5.6 Sol · 豆芽高",
+      querySelectorAll() {{
+        return [
+          {{ children: [], textContent: "5.6 Sol · 豆芽" }},
+          {{ children: [], textContent: "高" }},
+        ];
+      }},
+    }};
+    return {{
+      textContent: "5.6 Terra Pro Openai Compact · 豆芽轻度5.6 Terra Pro Openai Compact · 豆芽极高5.6 Sol · 豆芽高",
+      querySelectorAll(selector) {{
+        return selector.includes("aria-hidden") ? [{{ remove() {{}} }}] : [];
+      }},
+      querySelector(selector) {{
+        return selector.includes("data-tooltip-overflow-target") ? visibleRoot : null;
+      }},
+    }};
+  }},
+}});
+
+api.setModelCatalog({{ status: "ok", model: "gpt-5.4", default_model: "gpt-5.4", models: ["gpt-5.4"] }});
+api.setCurrentModelLabel("", true);
+const staleCatalogModel = api.currentModelName();
+const staleCatalogAvailability = api.fastAvailability();
+
+api.setModelCatalog({{
+  status: "ok",
+  model: "gpt-5.6-terra",
+  default_model: "gpt-5.6-terra",
+  models: ["gpt-5.6-terra"],
+  model_descriptors: [{{ model: "gpt-5.6-terra", displayName: "gpt-5.6-terra" }}],
+}});
+api.setCurrentModelLabel("5.6 Terra Pro Openai Compact · 豆芽 高", true);
+const compactVariantAvailability = api.fastAvailability();
+
+api.setCurrentModelLabel("");
+const suffixedTerraFast = api.applyServiceTierOverride("turn/start", {{
+  threadId: "thread-12345678",
+  model: "gpt-5.6-terra--cc-relay_a",
+  service_tier: null,
+}}, "");
+const compactSolModel = api.applyServiceTierOverride("turn/start", {{
+  threadId: "thread-12345678",
+  model: "gpt-5.6-sol-openai-compact",
+  service_tier: "priority",
+}}, "");
+
 process.stdout.write(JSON.stringify({{
   supportedFast,
+  localizedSolAvailability,
+  localizedSolFast,
+  visibleModelButtonText,
+  staleCatalogModel,
+  staleCatalogAvailability,
+  compactVariantAvailability,
+  suffixedTerraFast,
   unsupportedModel,
+  compactSolModel,
   turnWithoutModel,
   turnWithoutModelDiagnosticModel,
   customInheritUnsupported,
@@ -834,6 +945,241 @@ process.stdout.write(JSON.stringify({{
         .arg(&harness_path)
         .output()
         .expect("node should run service-tier harness");
+    assert!(
+        output.status.success(),
+        "node harness failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("harness stdout should be JSON")
+}
+
+#[test]
+fn injection_script_applies_projectless_main_window_contract() {
+    let script = assets::injection_script(57321);
+    assert!(script.contains("installCodexProjectlessNewTaskButtons"));
+    assert!(script.contains("codexProjectlessMainWindowVersion = \"5\""));
+    assert!(script.contains("generic-new-task-button"));
+    assert!(script.contains("loadCodexAppModule(\"projectless-thread-\")"));
+    assert!(script.contains("projectless_thread_start_overridden"));
+    assert!(script.contains("projectless_app_server_start_overridden"));
+    assert!(script.contains("projectless_main_window_home_route_cleared"));
+    assert!(script.contains("dispatcher.dispatchHostMessage"));
+    assert!(script.contains("[\"use-host-config-\", \"app-server-manager-signals-\"]"));
+    assert!(script.contains("codexProjectlessMainWindowRetryDelaysMs = [0, 250, 750, 1500, 3000]"));
+    let cases = run_projectless_main_window_contract_harness();
+
+    assert_eq!(cases["englishNewTask"], "generic");
+    assert_eq!(cases["chineseNewTask"], "generic");
+    assert_eq!(cases["compactChineseNewTask"], "generic");
+    assert_eq!(cases["quickChat"], "generic");
+    assert_eq!(cases["explicitProject"], "project");
+    assert_eq!(cases["projectRow"], "project");
+    assert_eq!(cases["unrelated"], "");
+    assert_eq!(cases["genericEnabled"], true);
+    assert_eq!(cases["projectRequestNeedsOverride"], true);
+    assert_eq!(cases["nativeProjectlessNeedsOverride"], false);
+    assert_eq!(cases["patchedWorkspaceKind"], "projectless");
+    assert_eq!(cases["patchedCwd"], "C:/generated/work");
+    assert_eq!(cases["patchedOutputDirectory"], "C:/generated/outputs");
+    assert_eq!(cases["patchedWorkspaceRoots"], json!(["C:/generated/work"]));
+    assert_eq!(
+        cases["patchedPermissionRoots"],
+        json!(["C:/generated/work"])
+    );
+    assert_eq!(cases["patchedWritableRoots"], json!(["C:/generated/work"]));
+    assert_eq!(cases["patchedHasProjectAssignment"], false);
+    assert_eq!(cases["dispatchResult"], "sent");
+    assert_eq!(cases["dispatchedCount"], 1);
+    assert_eq!(cases["dispatchedType"], "start-conversation");
+    assert_eq!(cases["dispatchedWorkspaceKind"], "projectless");
+    assert_eq!(cases["dispatchedCwd"], "C:/generated/work");
+    assert_eq!(cases["appServerRequestNeedsOverride"], true);
+    assert_eq!(cases["appServerPatchedWorkspaceKind"], "projectless");
+    assert_eq!(cases["appServerPatchedCwd"], "C:/generated/work");
+    assert_eq!(cases["appServerPatchedHasProjectAssignment"], false);
+    assert_eq!(cases["nestedAppServerWorkspaceKind"], "projectless");
+    assert_eq!(cases["nestedAppServerCwd"], "C:/generated/work");
+    assert_eq!(cases["appServerSentCount"], 1);
+    assert_eq!(cases["appServerSentMethod"], "start-conversation");
+    assert_eq!(cases["appServerSentWorkspaceKind"], "projectless");
+    assert_eq!(cases["appServerSentCwd"], "C:/generated/work");
+    assert_eq!(cases["explicitProjectWins"], false);
+    assert_eq!(cases["explicitProjectRequestIsUntouched"], false);
+    assert_eq!(cases["disabledIsNoop"], false);
+}
+
+fn run_projectless_main_window_contract_harness() -> serde_json::Value {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let script_path = temp.path().join("renderer-inject.js");
+    let harness_path = temp.path().join("projectless-main-window-harness.cjs");
+    std::fs::write(&script_path, assets::injection_script(57321))
+        .expect("injection script should be written");
+    let mut harness = std::fs::File::create(&harness_path).expect("harness should be created");
+    write!(
+        harness,
+        r#"
+const scriptPath = {script_path};
+const store = new Map();
+function node() {{
+  return {{
+    appendChild() {{}}, prepend() {{}}, remove() {{}}, setAttribute() {{}}, removeAttribute() {{}},
+    addEventListener() {{}}, querySelector() {{ return null; }}, querySelectorAll() {{ return []; }},
+    closest() {{ return null; }},
+    classList: {{ add() {{}}, remove() {{}}, toggle() {{}}, contains() {{ return false; }} }},
+    dataset: {{}}, style: {{}}, children: [], isConnected: true, textContent: "", innerHTML: "",
+  }};
+}}
+function trigger(label, kind = "generic") {{
+  const value = {{
+    textContent: label,
+    getAttribute(name) {{ return name === "aria-label" ? label : null; }},
+    closest(selector) {{
+      if (selector.includes('Start new chat in') || selector.includes('data-app-action-sidebar-project-row')) {{
+        return kind === "project-button" || kind === "project-row" ? value : null;
+      }}
+      if (selector === 'button, a, [role="button"], [role="menuitem"]') return value;
+      return null;
+    }},
+  }};
+  return value;
+}}
+globalThis.window = globalThis;
+window.__CODEX_PLUS_TEST_PROJECTLESS__ = true;
+window.addEventListener = () => {{}};
+window.removeEventListener = () => {{}};
+window.dispatchEvent = () => true;
+globalThis.Element = class Element {{}};
+globalThis.HTMLElement = class HTMLElement extends Element {{}};
+globalThis.HTMLAnchorElement = class HTMLAnchorElement extends HTMLElement {{}};
+globalThis.MutationObserver = class MutationObserver {{ observe() {{}} disconnect() {{}} }};
+globalThis.ResizeObserver = class ResizeObserver {{ observe() {{}} disconnect() {{}} }};
+globalThis.requestAnimationFrame = () => 0;
+globalThis.cancelAnimationFrame = () => {{}};
+globalThis.document = {{
+  scripts: [], documentElement: node(), body: node(), createElement: () => node(),
+  getElementById: () => null, querySelector: () => null, querySelectorAll: () => [],
+  addEventListener() {{}}, removeEventListener() {{}},
+}};
+globalThis.localStorage = {{
+  getItem: (key) => store.has(key) ? store.get(key) : null,
+  setItem: (key, value) => store.set(key, String(value)), removeItem: (key) => store.delete(key),
+}};
+store.set("codexPlusSettings", JSON.stringify({{ modelWhitelistUnlock: false }}));
+globalThis.sessionStorage = globalThis.localStorage;
+globalThis.location = {{ href: "https://codex.test/index.html", pathname: "/index.html", search: "", hash: "" }};
+window.location = globalThis.location;
+globalThis.navigator = {{ userAgent: "node-test" }};
+globalThis.performance = {{ getEntriesByType: () => [] }};
+require(scriptPath);
+void (async () => {{
+const api = window.__codexPlusProjectlessTest;
+const englishNewTask = api.triggerKind(trigger("New task"));
+const chineseNewTask = api.triggerKind(trigger("新建任务\nCtrl+N"));
+const compactChineseNewTask = api.triggerKind(trigger("新建任务Ctrl+N"));
+const quickChat = api.triggerKind(trigger("Quick Chat"));
+const explicitProject = api.triggerKind(trigger("Start new chat in Demo", "project-button"));
+const projectRow = api.triggerKind(trigger("Demo", "project-row"));
+const unrelated = api.triggerKind(trigger("Settings"));
+api.setEnabled(true);
+api.setIntent("generic", "test");
+const genericEnabled = api.shouldEnforce();
+const context = {{ cwd: "C:/generated/work", projectlessOutputDirectory: "C:/generated/outputs", workspaceRoots: ["C:/generated/work"] }};
+const projectRequest = {{
+  type: "start-conversation",
+  cwd: "C:/recent-project",
+  workspaceRoots: ["C:/recent-project"],
+  workspaceKind: "project",
+  projectAssignment: {{ projectKind: "local", projectId: "C:/recent-project" }},
+  permissions: {{
+    runtimeWorkspaceRoots: ["C:/recent-project"],
+    sandboxPolicy: {{ type: "workspaceWrite", writableRoots: ["C:/recent-project"] }},
+  }},
+}};
+const projectRequestNeedsOverride = api.requestNeedsOverride(projectRequest);
+const patchedRequest = api.applyRequestOverride(projectRequest, context);
+const nativeProjectlessNeedsOverride = api.requestNeedsOverride({{
+  type: "start-conversation",
+  cwd: "C:/native/work",
+  workspaceRoots: ["C:/native/work"],
+  workspaceKind: "projectless",
+  projectlessOutputDirectory: "C:/native/outputs",
+}});
+const dispatched = [];
+const dispatcher = {{
+  __codexServiceTierOriginalDispatchMessage(type, payload) {{
+    dispatched.push({{ type, payload }});
+    return "sent";
+  }},
+}};
+api.setDraftContext(context);
+const dispatchResult = await api.dispatchMessage(dispatcher, "start-conversation", projectRequest);
+const appServerProjectRequest = {{ ...projectRequest }};
+delete appServerProjectRequest.type;
+const appServerRequestNeedsOverride = api.appServerRequestNeedsOverride("start-conversation", appServerProjectRequest);
+const appServerPatchedRequest = api.applyAppServerRequestOverride("start-conversation", appServerProjectRequest, context);
+const nestedAppServerPatchedRequest = api.applyAppServerRequestOverride("send-cli-request-for-host", {{
+  method: "thread/start",
+  params: appServerProjectRequest,
+}}, context);
+const appServerSent = [];
+const appServerClient = {{
+  async sendRequest(method, params) {{
+    appServerSent.push({{ method, params }});
+    return {{ ok: true }};
+  }},
+}};
+api.patchAppServerClient(appServerClient);
+await appServerClient.sendRequest("start-conversation", appServerProjectRequest);
+api.setIntent("project", "test");
+const explicitProjectWins = api.shouldEnforce();
+const explicitProjectRequestIsUntouched = api.requestNeedsOverride(projectRequest);
+api.setEnabled(false);
+api.setIntent("generic", "test");
+const disabledIsNoop = api.shouldEnforce();
+process.stdout.write(JSON.stringify({{
+  englishNewTask, chineseNewTask, compactChineseNewTask, quickChat, explicitProject, projectRow, unrelated,
+  genericEnabled, projectRequestNeedsOverride, nativeProjectlessNeedsOverride,
+  patchedWorkspaceKind: patchedRequest.workspaceKind,
+  patchedCwd: patchedRequest.cwd,
+  patchedOutputDirectory: patchedRequest.projectlessOutputDirectory,
+  patchedWorkspaceRoots: patchedRequest.workspaceRoots,
+  patchedPermissionRoots: patchedRequest.permissions.runtimeWorkspaceRoots,
+  patchedWritableRoots: patchedRequest.permissions.sandboxPolicy.writableRoots,
+  patchedHasProjectAssignment: Object.hasOwn(patchedRequest, "projectAssignment"),
+  dispatchResult,
+  dispatchedCount: dispatched.length,
+  dispatchedType: dispatched[0]?.type,
+  dispatchedWorkspaceKind: dispatched[0]?.payload?.workspaceKind,
+  dispatchedCwd: dispatched[0]?.payload?.cwd,
+  appServerRequestNeedsOverride,
+  appServerPatchedWorkspaceKind: appServerPatchedRequest.workspaceKind,
+  appServerPatchedCwd: appServerPatchedRequest.cwd,
+  appServerPatchedHasProjectAssignment: Object.hasOwn(appServerPatchedRequest, "projectAssignment"),
+  nestedAppServerWorkspaceKind: nestedAppServerPatchedRequest.params.workspaceKind,
+  nestedAppServerCwd: nestedAppServerPatchedRequest.params.cwd,
+  appServerSentCount: appServerSent.length,
+  appServerSentMethod: appServerSent[0]?.method,
+  appServerSentWorkspaceKind: appServerSent[0]?.params?.workspaceKind,
+  appServerSentCwd: appServerSent[0]?.params?.cwd,
+  explicitProjectWins, explicitProjectRequestIsUntouched, disabledIsNoop,
+}}));
+process.exit(0);
+}})().catch((error) => {{
+  console.error(error);
+  process.exit(1);
+}});
+"#,
+        script_path = serde_json::to_string(&script_path.to_string_lossy().to_string())
+            .expect("script path should serialize")
+    )
+    .expect("harness should be written");
+    drop(harness);
+
+    let output = Command::new("node")
+        .arg(&harness_path)
+        .output()
+        .expect("node should run projectless main-window harness");
     assert!(
         output.status.success(),
         "node harness failed\nstdout:\n{}\nstderr:\n{}",

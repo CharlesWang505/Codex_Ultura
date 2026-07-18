@@ -47,12 +47,20 @@ Codex
 
 8787 网关默认关闭。网关运行时，供应商的 Base URL、协议和 Key 会被锁定，避免运行中的路由配置被改坏；先关闭热切换即可继续编辑。
 
+使用 Compass API 配置时，Codex 左下角账户菜单会增加“退出 API 登录”。该操作会停止热切换并清除当前 `custom` API 配置，优先恢复已有官方账号认证，但不会删除 Compass 保存的供应商、Key 和模型映射；完成后需重启 Codex。
+
 ### 3. 手机远控
 
 手机远控通过用户自建的 HTTPS/WSS 中继网站连接本机 Codex app-server。电脑主动建立出站连接，手机可以按 Codex 左侧正式项目查看已有任务会话；未授权项目只允许读取历史，电脑端一键同步或手工授权后才可新建或继续会话、发送问题、选择本机插件 Skills、加密上传附件、接收流式回复并停止生成。插件与技能在手机端使用中文名称和说明，同时保留中英文搜索。Codex 当前有效的本机认证（`apiKey` 或 `chatgpt`）由 app-server 在电脑上复用，认证文件、Cookie、Token 和 API Key 不会发送到中继。
 
 远控默认关闭且不提供任何默认公网地址，用户必须部署并填写自己的 HTTPS/WSS 中继；维护者的私人服务器不会写入安装包或分配给其他用户。Relay ZIP 提供 Windows 上传向导和 VPS 一键安装器，可自动配置经过校验的 Node.js、systemd、Nginx、证书和健康检查。执行权限默认不授权任何工作区；“一键同步 Codex 项目”导入的新项目默认禁止修改文件、运行命令和手机上传。公网只部署中继站点，不得暴露本机 8787 或 app-server。局域网配对同样默认关闭，开启后支持电脑生成二维码/六位码邀请手机，也支持手机主动向同网电脑请求绑定；两种方式都必须在电脑端核对校验码并批准。部署前请阅读 [部署说明](./docs/REMOTE_CONTROL_DEPLOYMENT.md)、[协议文档](./docs/REMOTE_CONTROL_PROTOCOL.md)、[安全模型](./docs/REMOTE_CONTROL_SECURITY.md) 和 [app-server 兼容报告](./docs/CODEX_APP_SERVER_COMPATIBILITY.md)。
-### 4. 代理测速
+### 4. Codex 主题工坊
+
+“主题工坊”可为 Codex 桌面界面应用本地主题，不修改官方安装包、`app.asar` 或 WindowsApps。它支持四套内置主题、主题复制、颜色与透明度调整、本地壁纸、字体、圆角、玻璃模糊，以及 `.zip` / `.cc-theme` 声明式主题包。新任务首页还可配置品牌文字、标题、横幅、右侧装饰图和四张快捷任务卡；快捷卡只填入提示词，不自动发送。
+
+主题通过 Compass 的本机 CDP 注入链应用，Codex 重启后可自动恢复。第三方主题包不能包含 JavaScript、CSS、HTML、可执行文件或远程资源，导入时会限制压缩包路径、大小、文件数量和图片类型。完整格式和安全说明见 [Codex 主题工坊文档](./docs/THEME_STUDIO.md)。
+
+### 5. 代理测速
 
 代理测速用于回答一个很实际的问题：**同一个 API 中转站，经过哪个 Clash/Mihomo 节点访问最快、最稳定？**
 

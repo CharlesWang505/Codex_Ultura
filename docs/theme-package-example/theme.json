@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 3,
+  "id": "example-rose-paper",
+  "name": "示例蔷薇稿纸",
+  "description": "Codex Compass Theme v3 示例。",
+  "author": "Local user",
+  "version": "1.0.0",
+  "license": "Private",
+  "decorativeStyle": "none",
+  "wallpaper": "",
+  "showcase": {
+    "enabled": true,
+    "eyebrow": "我的主题 · Codex Compass",
+    "title": "今天想构建什么？",
+    "subtitle": "选择一个方向，或在下方输入你的任务。",
+    "heroImage": "",
+    "portraitImage": "",
+    "showCards": true,
+    "cards": [
+      {
+        "title": "探索与理解代码",
+        "prompt": "请先阅读当前项目，解释关键结构，并指出最值得从哪里开始。",
+        "icon": "code"
+      },
+      {
+        "title": "构建新功能",
+        "prompt": "请根据当前项目实现一个完整的新功能，先分析现有结构，再编码、测试并汇报结果。",
+        "icon": "build"
+      },
+      {
+        "title": "审查代码并提出建议",
+        "prompt": "请审查当前项目的代码，优先查找缺陷、回归风险和缺失测试，并给出可执行建议。",
+        "icon": "review"
+      },
+      {
+        "title": "修复问题和失败",
+        "prompt": "请诊断当前项目中的问题或失败，定位根因，实施修复并运行验证。",
+        "icon": "repair"
+      }
+    ]
+  },
+  "presentation": {
+    "layoutStyle": "editorial",
+    "cardStyle": "paper",
+    "motifStyle": "roses",
+    "headerBadge": "ROSE EDITION",
+    "heroPosition": "far-right",
+    "overlayStrength": 88,
+    "taskWallpaperOpacity": 8,
+    "taskMode": "ambient"
+  },
+  "visual": {
+    "accent": "#c95f7b",
+    "accentSoft": "#f7dce3",
+    "background": "#fff8f9",
+    "surface": "#fffdfd",
+    "surfaceAlt": "#fbeef1",
+    "text": "#39252c",
+    "textMuted": "#806b72",
+    "border": "#eacbd3",
+    "sidebarOpacity": 96,
+    "contentOpacity": 94,
+    "wallpaperOpacity": 58,
+    "blurPx": 16,
+    "radiusPx": 14,
+    "fontScale": 100,
+    "fontFamily": "system",
+    "wallpaperFit": "cover"
+  }
+}

@@ -1,0 +1,20 @@
+Codex Compass Theme Studio Asset Sources
+
+Generated runtime wallpaper set (8 files)
+
+- black-gold-stage-wallpaper.webp
+- butterfly-cosmos-wallpaper.webp
+- cyan-virtual-stage-wallpaper.webp
+- enfp-doodle-wallpaper.webp
+- fortune-workbench-wallpaper.webp
+- red-future-city-wallpaper.webp
+- rose-editorial-wallpaper.webp
+- sage-paper-wallpaper.webp
+
+Source: generated with the built-in Image Generation tool for Codex Compass.
+Content: original fictional adult characters or original scenes.
+Processing: cropped, resized, and compressed to WebP for runtime use.
+
+The concept screenshots and images from the referenced third-party repositories
+were used only as visual references. They were not copied, bundled, or used as
+runtime assets.

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   Activity,
   AlertTriangle,
@@ -16,6 +16,7 @@ import {
   Info,
   KeyRound,
   LayoutDashboard,
+  Languages,
   MessageCircle,
   Minimize2,
   Minus,
@@ -72,6 +73,7 @@ import { createDemoSnapshot } from './lib/sampleData'
 import { computeAnalytics, safeDivide } from './lib/analytics'
 import { buildTimeWindow, DAY_MS, timeWindowKey, type TimeRange, type TimeWindow } from './lib/timeWindow'
 import { chartTheme, useTheme } from './lib/theme'
+import { useLanguage } from './lib/i18n'
 import {
   getAppVersion,
   isTauriRuntime,
@@ -101,6 +103,7 @@ const navItems: Array<[string, LucideIcon]> = [
   ['热切换', Zap],
   ['会话管理', MessageCircle],
   ['手机远控', Smartphone],
+  ['主题工坊', Palette],
   ['工具与插件', Network],
   ['Codex增强', ShieldCheck],
   ['脚本市场', Download],
@@ -113,6 +116,7 @@ const CODEX_SECTIONS = new Set<CodexSection>([
   '供应商配置',
   '热切换',
   '会话管理',
+  '主题工坊',
   '工具与插件',
   'Codex增强',
   '脚本市场',
@@ -145,15 +149,16 @@ function runWindowAction(action: WindowAction) {
 }
 
 function WindowControls() {
+  const { t } = useLanguage()
   return (
-    <div className="window-controls" aria-label="窗口控制">
-      <button className="window-control" type="button" aria-label="最小化" title="最小化" onClick={() => runWindowAction('minimize')}>
+    <div className="window-controls" aria-label={t('窗口控制')}>
+      <button className="window-control" type="button" aria-label={t('最小化')} title={t('最小化')} onClick={() => runWindowAction('minimize')}>
         <Minus size={15} />
       </button>
-      <button className="window-control" type="button" aria-label="最大化或还原" title="最大化或还原" onClick={() => runWindowAction('toggleMaximize')}>
+      <button className="window-control" type="button" aria-label={t('最大化或还原')} title={t('最大化或还原')} onClick={() => runWindowAction('toggleMaximize')}>
         <Square size={12} />
       </button>
-      <button className="window-control window-close" type="button" aria-label="关闭" title="关闭" onClick={() => runWindowAction('close')}>
+      <button className="window-control window-close" type="button" aria-label={t('关闭')} title={t('关闭')} onClick={() => runWindowAction('close')}>
         <X size={15} />
       </button>
     </div>
@@ -190,6 +195,40 @@ function formatDecimal(value: number) {
 
 function formatLatency(value: number) {
   return value > 0 ? `${(value / 1000).toFixed(2)}s` : '-'
+}
+
+function RefreshCountdown({
+  active,
+  nextRefreshAt,
+  loading,
+}: {
+  active: boolean
+  nextRefreshAt: number
+  loading: boolean
+}) {
+  const [now, setNow] = useState(Date.now())
+  const [visible, setVisible] = useState(() => document.visibilityState === 'visible')
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      setVisible(document.visibilityState === 'visible')
+      setNow(Date.now())
+    }
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        setNow(Date.now())
+      }
+    }, 1000)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [])
+
+  const secondsUntilRefresh = Math.max(0, Math.ceil((nextRefreshAt - now) / 1000))
+  const refreshCountdown = `${Math.floor(secondsUntilRefresh / 60)}:${String(secondsUntilRefresh % 60).padStart(2, '0')}`
+  return <strong>{!active || !visible ? '已暂停' : loading ? '——' : refreshCountdown}</strong>
 }
 
 type TimingLevel = 'good' | 'warn' | 'bad' | 'unknown'
@@ -1099,6 +1138,7 @@ function validateSite(site: RelaySite) {
 
 function App() {
   const [theme, toggleTheme] = useTheme()
+  const { language, setLanguage, t } = useLanguage()
   const [appVersion, setAppVersion] = useState(__APP_VERSION__)
   const [brandRestartState, setBrandRestartState] = useState<'idle' | 'busy' | 'ok' | 'error'>('idle')
   const [closeBehavior, setCloseBehavior] = useState<CloseBehavior>('ask')
@@ -1137,7 +1177,6 @@ function App() {
   const [logPageSize, setLogPageSize] = useState(20)
   const [logPage, setLogPage] = useState(1)
   const [nextRefreshAt, setNextRefreshAt] = useState(Date.now() + selectedSite.refreshMinutes * 60_000)
-  const [clock, setClock] = useState(Date.now())
   const [showSecret, setShowSecret] = useState(false)
   const [showKeyProbeEditor, setShowKeyProbeEditor] = useState(() => Boolean(selectedSite.apiKeyProbes?.length))
   const [storageReady, setStorageReady] = useState(false)
@@ -1413,7 +1452,9 @@ function App() {
             groupsReady: false,
             completedKeyChecks: 0,
           })
-          setSnapshot((current) => ({ ...current, keyChecks: [] }))
+          startTransition(() => {
+            setSnapshot((current) => ({ ...current, keyChecks: [] }))
+          })
           try {
             let currentSite = selectedSiteRef.current
             const refreshedAt = Date.now()
@@ -1447,42 +1488,48 @@ function App() {
               }
 
               if (progress.kind === 'logs') {
-                setRefreshProgress((current) => ({
-                  loadedLogs: progress.loadedLogs,
-                  totalLogs: progress.totalLogs,
-                  groupsReady: current?.groupsReady ?? false,
-                  completedKeyChecks: current?.completedKeyChecks ?? 0,
-                  totalKeyChecks: current?.totalKeyChecks,
-                }))
-                setSnapshot((current) => ({
-                  ...current,
-                  generatedAt: new Date().toISOString(),
-                  mode: 'partial',
-                  logs: progress.logs,
-                }))
+                startTransition(() => {
+                  setRefreshProgress((current) => ({
+                    loadedLogs: progress.loadedLogs,
+                    totalLogs: progress.totalLogs,
+                    groupsReady: current?.groupsReady ?? false,
+                    completedKeyChecks: current?.completedKeyChecks ?? 0,
+                    totalKeyChecks: current?.totalKeyChecks,
+                  }))
+                  setSnapshot((current) => ({
+                    ...current,
+                    generatedAt: new Date().toISOString(),
+                    mode: 'partial',
+                    logs: progress.logs,
+                  }))
+                })
                 return
               }
 
               if (progress.kind === 'groups') {
-                setRefreshProgress((current) => ({
-                  loadedLogs: current?.loadedLogs ?? 0,
-                  totalLogs: current?.totalLogs,
-                  groupsReady: true,
-                  completedKeyChecks: current?.completedKeyChecks ?? 0,
-                  totalKeyChecks: current?.totalKeyChecks,
-                }))
-                setSnapshot((current) => ({ ...current, groups: progress.groups }))
+                startTransition(() => {
+                  setRefreshProgress((current) => ({
+                    loadedLogs: current?.loadedLogs ?? 0,
+                    totalLogs: current?.totalLogs,
+                    groupsReady: true,
+                    completedKeyChecks: current?.completedKeyChecks ?? 0,
+                    totalKeyChecks: current?.totalKeyChecks,
+                  }))
+                  setSnapshot((current) => ({ ...current, groups: progress.groups }))
+                })
                 return
               }
 
-              setRefreshProgress((current) => ({
-                loadedLogs: current?.loadedLogs ?? 0,
-                totalLogs: current?.totalLogs,
-                groupsReady: current?.groupsReady ?? false,
-                completedKeyChecks: progress.completedKeyChecks,
-                totalKeyChecks: progress.totalKeyChecks,
-              }))
-              setSnapshot((current) => ({ ...current, keyChecks: progress.keyChecks }))
+              startTransition(() => {
+                setRefreshProgress((current) => ({
+                  loadedLogs: current?.loadedLogs ?? 0,
+                  totalLogs: current?.totalLogs,
+                  groupsReady: current?.groupsReady ?? false,
+                  completedKeyChecks: progress.completedKeyChecks,
+                  totalKeyChecks: progress.totalKeyChecks,
+                }))
+                setSnapshot((current) => ({ ...current, keyChecks: progress.keyChecks }))
+              })
             }
 
             let next = await fetchUsageSnapshot(currentSite, refreshedRequestRange, showProgress)
@@ -1495,11 +1542,15 @@ function App() {
                   groupsReady: false,
                   completedKeyChecks: 0,
                 })
-                setSnapshot((current) => ({ ...current, keyChecks: [] }))
+                startTransition(() => {
+                  setSnapshot((current) => ({ ...current, keyChecks: [] }))
+                })
                 next = await fetchUsageSnapshot(loggedInSite, refreshedRequestRange, showProgress)
               }
             }
-            setSnapshot(next)
+            startTransition(() => {
+              setSnapshot(next)
+            })
           } catch {
             // fetchUsageSnapshot 内部已兜底，这里仅防御异常
           } finally {
@@ -1548,21 +1599,48 @@ function App() {
     void refreshSnapshot('manual')
   }, [activeTimeWindow.valid, rangeSelectionKey, refreshSnapshot, storageReady])
 
-  // 自动刷新定时器：切换站点或修改间隔后会重建，刷新周期随之重置。
+  // 自动刷新只在概览页且窗口可见时运行。
   useEffect(() => {
-    if (!storageReady) {
+    if (!storageReady || activeSection !== '概览') {
       return
     }
-    const timer = window.setInterval(() => {
+    const intervalMs = selectedSite.refreshMinutes * 60_000
+    let timer: number | undefined
+    const clearTimer = () => {
+      if (timer !== undefined) {
+        window.clearTimeout(timer)
+        timer = undefined
+      }
+    }
+    const schedule = () => {
+      if (document.hidden) {
+        return
+      }
+      timer = window.setTimeout(() => {
+        timer = undefined
+        if (!document.hidden) {
+          void refreshSnapshot('auto')
+        }
+        schedule()
+      }, intervalMs)
+    }
+    const handleVisibilityChange = () => {
+      clearTimer()
+      if (document.hidden || activeSection !== '概览') {
+        return
+      }
+      setNextRefreshAt(Date.now() + intervalMs)
       void refreshSnapshot('auto')
-    }, selectedSite.refreshMinutes * 60_000)
-    return () => window.clearInterval(timer)
-  }, [refreshSnapshot, selectedSite.refreshMinutes, storageReady])
+      schedule()
+    }
 
-  useEffect(() => {
-    const timer = window.setInterval(() => setClock(Date.now()), 1000)
-    return () => window.clearInterval(timer)
-  }, [])
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    schedule()
+    return () => {
+      clearTimer()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [activeSection, refreshSnapshot, selectedSite.refreshMinutes, storageReady])
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0 })
@@ -1863,8 +1941,6 @@ function App() {
 
   const analytics = useMemo(() => computeAnalytics(scopedSnapshot), [scopedSnapshot])
 
-  const secondsUntilRefresh = Math.max(0, Math.ceil((nextRefreshAt - clock) / 1000))
-  const refreshCountdown = `${Math.floor(secondsUntilRefresh / 60)}:${String(secondsUntilRefresh % 60).padStart(2, '0')}`
   const sourceHealth = snapshot.sources.filter((source) => source.ok || source.optional).length
   const hasLiveData = snapshot.mode !== 'demo'
   const isEmptyLive = hasLiveData && timeScopedLogs.length === 0
@@ -1905,7 +1981,7 @@ function App() {
   )
 
   return (
-    <main className="app-shell">
+    <main className="app-shell low-power-rendering">
       <header className="window-bar">
         <div className="brand" data-tauri-drag-region onDoubleClick={() => runWindowAction('toggleMaximize')}>
           <button
@@ -1919,20 +1995,39 @@ function App() {
           >
             <Zap size={18} />
           </button>
-          <strong data-tauri-drag-region>Codex Compass · 法典指南针</strong>
+          <strong data-tauri-drag-region>{language === 'zh-CN' ? '法典指南' : 'Codex Compass'}</strong>
           {brandRestartState !== 'idle' ? <span className={`brand-restart-status ${brandRestartState}`}>{brandRestartState === 'busy' ? '正在重启 Codex…' : brandRestartState === 'ok' ? '已请求重启' : '重启失败'}</span> : null}
         </div>
         <div className="window-drag-region" data-tauri-drag-region onDoubleClick={() => runWindowAction('toggleMaximize')} />
         <div className="window-bar-actions">
+          <div className="language-toggle" role="group" aria-label={language === 'zh-CN' ? '语言' : 'Language'}>
+            <Languages size={15} aria-hidden="true" />
+            <button
+              className={language === 'zh-CN' ? 'active' : ''}
+              type="button"
+              aria-pressed={language === 'zh-CN'}
+              onClick={() => setLanguage('zh-CN')}
+            >
+              中文
+            </button>
+            <button
+              className={language === 'en-US' ? 'active' : ''}
+              type="button"
+              aria-pressed={language === 'en-US'}
+              onClick={() => setLanguage('en-US')}
+            >
+              EN
+            </button>
+          </div>
           <button
             className="theme-toggle"
             type="button"
             onClick={toggleTheme}
-            aria-label={theme === 'dark' ? '切换到浅色主题' : theme === 'light' ? '切换到浅粉主题' : '切换到深色主题'}
-            title={theme === 'dark' ? '切换到浅色主题' : theme === 'light' ? '切换到浅粉主题' : '切换到深色主题'}
+            aria-label={t(theme === 'dark' ? '切换到浅色主题' : theme === 'light' ? '切换到浅粉主题' : '切换到深色主题')}
+            title={t(theme === 'dark' ? '切换到浅色主题' : theme === 'light' ? '切换到浅粉主题' : '切换到深色主题')}
           >
             {theme === 'dark' ? <Sun size={15} /> : theme === 'light' ? <Palette size={15} /> : <Moon size={15} />}
-            {theme === 'dark' ? '浅色' : theme === 'light' ? '浅粉' : '深色'}
+            {t(theme === 'dark' ? '浅色' : theme === 'light' ? '浅粉' : '深色')}
           </button>
           <WindowControls />
         </div>
@@ -1940,7 +2035,7 @@ function App() {
 
       <div className="app-body">
       <aside className="sidebar">
-        <nav className="nav-list" aria-label="主导航">
+        <nav className="nav-list" aria-label={t('主导航')}>
           {navItems.map(([label, Icon]) => (
             <button
               className={activeSection === label ? 'nav-item nav-active' : 'nav-item'}
@@ -1950,13 +2045,13 @@ function App() {
               onClick={() => setActiveSection(String(label))}
             >
               <Icon size={18} />
-              <span>{label}</span>
+              <span>{t(label)}</span>
             </button>
           ))}
         </nav>
 
         <section className="site-stack">
-          <div className="rail-label">站点</div>
+          <div className="rail-label">{t('站点')}</div>
           {sites.map((site) => (
             <button
               className={site.id === selectedSite.id ? 'site-pill site-pill-active' : 'site-pill'}
@@ -2037,7 +2132,11 @@ function App() {
               <span className="live-dot" />
               <Clock3 size={15} />
               每 {selectedSite.refreshMinutes} 分钟
-              <strong>{loading ? '——' : refreshCountdown}</strong>
+              <RefreshCountdown
+                active={activeSection === '概览'}
+                nextRefreshAt={nextRefreshAt}
+                loading={loading}
+              />
             </div>
             <div className="last-update">
               <span>最后更新：</span>
@@ -2661,7 +2760,12 @@ function App() {
               <div className="settings-grid">
                 <label>
                   名称
-                  <input value={draftSite.name} onChange={(event) => setDraftSite({ ...draftSite, name: event.target.value })} />
+                  <input
+                    value={language === 'en-US' && draftSite.id === 'demo-relay' && draftSite.name === '演示中转站'
+                      ? 'Demo relay'
+                      : draftSite.name}
+                    onChange={(event) => setDraftSite({ ...draftSite, name: event.target.value })}
+                  />
                 </label>
                 <label className="full-width">
                   Base URL
@@ -2906,14 +3010,14 @@ function App() {
           )}
 
           {showSettings && (
-            <Panel className="about-panel" icon={<Info size={18} />} title="关于 Codex Compass">
+            <Panel className="about-panel" icon={<Info size={18} />} title={t('关于 Codex Compass')}>
               <div className="about-body">
                 <div className="about-product">
                   <div className="about-product-mark"><Zap size={22} /></div>
                   <div>
-                    <strong>Codex Compass</strong>
-                    <span>法典指南针</span>
-                    <span>版本 v{appVersion}</span>
+                    <strong>{language === 'zh-CN' ? '法典指南' : 'Codex Compass'}</strong>
+                    <span>{language === 'zh-CN' ? 'Codex Compass' : 'Codex Compass desktop control center'}</span>
+                    <span>{t('版本')} v{appVersion}</span>
                   </div>
                 </div>
                 <p>统一管理中转站账户监控、Codex 供应商配置与 8787 热切换。</p>

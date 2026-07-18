@@ -370,6 +370,10 @@
   installCodexPlusForceChineseLocale();
 
   const helperBase = window.__CODEX_PLUS_HELPER__ || "http://127.0.0.1:58321";
+  if (window.__codexPlusBackendHeartbeat) {
+    clearInterval(window.__codexPlusBackendHeartbeat);
+    window.__codexPlusBackendHeartbeat = null;
+  }
   const buttonClass = "codex-delete-button";
   const exportButtonClass = "codex-export-button";
   const projectMoveButtonClass = "codex-project-move-button";
@@ -378,6 +382,7 @@
   const actionGroupClass = "codex-session-actions";
   const moreButtonClass = "codex-session-more-button";
   const moreMenuClass = "codex-session-more-menu";
+  const sharedMoreMenuId = "codex-session-more-menu-shared";
   const actionTooltipClass = "codex-session-action-tooltip";
   const threadIdBadgeClass = "codex-thread-id-badge";
   const conversationViewMinWidth = 320;
@@ -460,11 +465,12 @@
   const codexThreadServiceTierMaxEntries = 120;
   const codexThreadServiceTierDraftBindWindowMs = 60 * 1000;
   const codexServiceTierRequestOverrideVersion = "3";
-  const codexAppServerModelRequestPatchVersion = "1";
+  const codexAppServerModelRequestPatchVersion = "2";
   const codexPluginMarketplaceUnlockVersion = "12";
-  const codexPluginAutoExpandVersion = "1";
+  const codexPluginAutoExpandVersion = "2";
   const codexPluginAutoExpandMaxClicks = 80;
   const codexPluginAutoExpandClickDelayMs = 90;
+  const codexPluginAutoExpandPageCacheTtlMs = 750;
   const codexThreadScrollMaxEntries = 120;
   const codexThreadScrollSaveThrottleMs = 120;
   const codexThreadScrollRestoreWindowMs = 3200;
@@ -474,6 +480,9 @@
   const codexThreadScrollRouteHooksVersion = "dispatcher:2";
   const codexThreadScrollListenerVersion = "4";
   const codexThreadScrollUserIntentVersion = "dispatcher:2";
+  const codexProjectlessMainWindowVersion = "5";
+  const codexProjectlessMainWindowSetting = { key: "hotkey-window-projectless-default-enabled", default: false };
+  const codexProjectlessMainWindowRetryDelaysMs = [0, 250, 750, 1500, 3000];
   const codexPlusImageOverlayId = "codex-plus-image-overlay";
   window.__codexProjectMoveRuntimeId = (window.__codexProjectMoveRuntimeId || 0) + 1;
   const codexProjectMoveRuntimeId = window.__codexProjectMoveRuntimeId;
@@ -1340,7 +1349,7 @@
     }
     if (key === "stepwise") syncStepwisePanel(value);
     renderCodexPlusMenu();
-    scan();
+    scan(true);
   }
 
   function syncStepwisePanel(enabled = codexPlusSettings().stepwise) {
@@ -1467,10 +1476,17 @@
     fastModelName: "",
     fastSupported: false,
   };
+  let codexServiceTierStateLoadRevision = 0;
   const codexDefaultServiceTierSetting = { key: "default-service-tier", default: null };
   const codexServiceTierFallbackFastValue = "priority";
   const codexServiceTierModulePromises = new Map();
-  const codexServiceTierSupportedFastModels = new Set(["gpt-5.4", "gpt-5.5"]);
+  const codexServiceTierSupportedFastModels = new Set([
+    "gpt-5.4",
+    "gpt-5.5",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+  ]);
   const codexThreadServiceTierModes = new Set(["inherit", "standard", "fast"]);
   const codexServiceTierControlModes = new Set(["inherit", "global-standard", "global-fast", "custom"]);
 
@@ -1514,6 +1530,16 @@
     return await codexServiceTierModulePromises.get(namePart);
   }
 
+  async function loadOptionalCodexAppModule(namePart) {
+    try {
+      return await loadCodexAppModule(namePart);
+    } catch (error) {
+      const message = String(error?.message || error);
+      if (message.includes(`未找到 Codex App asset: ${namePart}`)) return null;
+      throw error;
+    }
+  }
+
   async function codexSettingStorageModule() {
     const module = await loadCodexAppModule("setting-storage-");
     if (typeof module.n !== "function" || typeof module.s !== "function") {
@@ -1548,8 +1574,39 @@
     return Array.from(codexServiceTierSupportedFastModels).join(" / ");
   }
 
+  function codexServiceTierNormalizedModelText(model) {
+    const value = String(model || "").trim().toLowerCase();
+    if (!value) return "";
+    try {
+      return value.normalize("NFKC");
+    } catch {
+      return value;
+    }
+  }
+
+  function codexServiceTierCanonicalFastModelFromLabel(model, allowBare = false) {
+    const normalized = codexServiceTierNormalizedModelText(model);
+    if (!normalized) return "";
+    const explicitMatch = normalized.match(
+      /(?:^|[^a-z0-9])gpt[-_\s]*5[.\-_\s]*(4|5|6)(?:[-_\s]+(sol|terra|luna))?(?=$|--cc-|\s*(?:[·•|\/:：,，;；(){}\[\]]|$))/,
+    );
+    const bareMatch = allowBare
+      ? normalized.match(
+        /(?:^|[^a-z0-9])5[.\-_\s]*(4|5|6)(?:[-_\s]+(sol|terra|luna))?(?=$|\s*(?:[·•|\/:：,，;；(){}\[\]]|$))/,
+      )
+      : null;
+    const match = explicitMatch || bareMatch;
+    if (!match) return "";
+    const minor = match[1];
+    const flavor = match[2] || "";
+    if ((minor === "6") !== !!flavor) return "";
+    const candidate = minor === "6" ? `gpt-5.6-${flavor}` : `gpt-5.${minor}`;
+    return codexServiceTierSupportedFastModels.has(candidate) ? candidate : "";
+  }
+
   function normalizeCodexServiceTierModelName(model) {
-    return String(model || "").trim().toLowerCase();
+    const normalized = codexServiceTierNormalizedModelText(model);
+    return codexServiceTierCanonicalFastModelFromLabel(normalized) || normalized;
   }
 
   function codexServiceTierModelFromValue(value, visited = new WeakSet(), depth = 0) {
@@ -1567,8 +1624,98 @@
     return "";
   }
 
+  function codexServiceTierComparableModelLabel(value) {
+    return codexServiceTierNormalizedModelText(value)
+      .replace(/^gpt(?=[\s._-]*\d)/, "")
+      .replace(/[·•|\/:：,，;；(){}\[\]_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function codexServiceTierCatalogModelLabels() {
+    const entries = [];
+    const append = (modelName, labels) => {
+      const model = codexServiceTierModelFromValue(modelName);
+      if (!model) return;
+      uniqueValues(labels).forEach((label) => {
+        const comparable = codexServiceTierComparableModelLabel(label);
+        if (comparable) entries.push({ model, comparable });
+      });
+    };
+    (Array.isArray(codexModelCatalog.model_descriptors) ? codexModelCatalog.model_descriptors : []).forEach((descriptor) => {
+      append(descriptor, [
+        descriptor?.displayName,
+        descriptor?.display_name,
+        descriptor?.name,
+        descriptor?.model,
+        descriptor?.id,
+        descriptor?.slug,
+      ]);
+    });
+    (Array.isArray(codexModelCatalog.models) ? codexModelCatalog.models : []).forEach((model) => append(model, [model]));
+    return entries.sort((left, right) => right.comparable.length - left.comparable.length);
+  }
+
+  function codexServiceTierCatalogMatch(candidate, catalogLabels) {
+    const comparable = codexServiceTierComparableModelLabel(candidate);
+    if (!comparable) return "";
+    const variantSuffix = /^(?:pro|compact|openai|mini|max|preview|latest|thinking)\b/i;
+    const match = catalogLabels.find((entry) => {
+      if (comparable === entry.comparable) return true;
+      if (comparable.startsWith(`${entry.comparable} `)) {
+        const suffix = comparable.slice(entry.comparable.length).trim();
+        return !variantSuffix.test(suffix);
+      }
+      return entry.comparable.startsWith(`${comparable} `);
+    });
+    return match?.model || "";
+  }
+
+  function codexServiceTierModelSelection() {
+    const testLabel = window.__CODEX_PLUS_TEST_SERVICE_TIER__
+      ? String(window.__codexPlusServiceTierTestCurrentModelLabel || "").trim()
+      : "";
+    const testControlPresent = window.__CODEX_PLUS_TEST_SERVICE_TIER__
+      && window.__codexPlusServiceTierTestCurrentModelControlPresent === true;
+    if (window.__CODEX_PLUS_TEST_SERVICE_TIER__ && !testLabel) {
+      return { model: "", controlFound: testControlPresent };
+    }
+    const modelButtons = testLabel ? [] : codexServiceTierModelButtonCandidates();
+    const composer = testLabel || modelButtons.length ? null : codexServiceTierFindComposerEl();
+    const buttons = modelButtons.length
+      ? modelButtons
+      : (composer ? codexServiceTierBadgeButtonCandidates(composer) : []);
+    const candidates = testLabel
+      ? [testLabel]
+      : buttons.flatMap((button) => uniqueValues([
+        button.getAttribute?.("data-model"),
+        button.getAttribute?.("data-model-id"),
+        codexServiceTierModelButtonText(button),
+        button.getAttribute?.("aria-label"),
+        button.getAttribute?.("title"),
+      ]));
+    const catalogLabels = codexServiceTierCatalogModelLabels();
+    for (const candidate of candidates) {
+      const catalogMatch = codexServiceTierCatalogMatch(candidate, catalogLabels);
+      if (catalogMatch) return { model: catalogMatch, controlFound: true };
+      const canonical = codexServiceTierCanonicalFastModelFromLabel(candidate, true);
+      if (canonical) return { model: canonical, controlFound: true };
+    }
+    return {
+      model: modelButtons.length || testLabel ? String(candidates[0] || "").trim() : "",
+      controlFound: testControlPresent || modelButtons.length > 0,
+    };
+  }
+
+  function codexServiceTierModelFromComposer() {
+    return codexServiceTierModelSelection().model;
+  }
+
   function codexServiceTierCurrentModelName() {
-    return codexServiceTierModelFromValue(codexModelCatalog.model) || codexServiceTierModelFromValue(codexModelCatalog.default_model);
+    const selection = codexServiceTierModelSelection();
+    if (selection.model || selection.controlFound) return selection.model;
+    return codexServiceTierModelFromValue(codexModelCatalog.model)
+      || codexServiceTierModelFromValue(codexModelCatalog.default_model);
   }
 
   function codexServiceTierModelForRequest(params, modelHint = "") {
@@ -1576,7 +1723,11 @@
   }
 
   function codexServiceTierFastSupportedForModel(modelName) {
-    return codexServiceTierSupportedFastModels.has(normalizeCodexServiceTierModelName(modelName));
+    const normalizedModel = normalizeCodexServiceTierModelName(modelName);
+    if (codexServiceTierSupportedFastModels.has(normalizedModel)) return true;
+    const metadata = codexPlusModelMetadata(normalizedModel);
+    return Array.isArray(metadata?.additionalSpeedTiers)
+      && metadata.additionalSpeedTiers.some((tier) => String(tier).toLowerCase() === "fast");
   }
 
   function codexServiceTierFastUnsupportedMessage(modelName = codexServiceTierCurrentModelName()) {
@@ -1599,7 +1750,7 @@
     const normalizedModel = normalizeCodexServiceTierModelName(modelName);
     return {
       modelName: modelName || "",
-      supported: !!normalizedModel && codexServiceTierSupportedFastModels.has(normalizedModel),
+      supported: !!normalizedModel && codexServiceTierFastSupportedForModel(normalizedModel),
     };
   }
 
@@ -1784,11 +1935,6 @@
   }
 
   function setCodexServiceTierControlMode(mode) {
-    if (codexPlusBackendStatus.status !== "ok") {
-      showToast("后端未连接，无法切换服务模式", null);
-      refreshCodexServiceTierControls();
-      return;
-    }
     const normalizedMode = normalizeCodexServiceTierControlMode(mode);
     if (normalizedMode === "global-fast") {
       const fastAvailability = codexServiceTierFastAvailability();
@@ -1859,8 +2005,6 @@
   }
 
   function codexServiceTierBadgeState() {
-    if (codexPlusBackendStatus.status === "checking") return { tier: "loading", label: "...", disabled: true, title: "服务模式：正在检查后端连接" };
-    if (codexPlusBackendStatus.status && codexPlusBackendStatus.status !== "ok") return { tier: "failed", label: "未连接", disabled: true, title: "服务模式：后端未连接，无法切换" };
     if (codexServiceTierState.status === "loading") return { tier: "loading", label: "...", title: "服务模式：正在读取" };
     if (codexServiceTierState.status === "failed") return { tier: "failed", label: "?", title: "服务模式：读取失败" };
     const fastAvailability = codexServiceTierFastAvailability();
@@ -1895,10 +2039,9 @@
     syncCodexServiceTierEffectiveState();
     const featureEnabled = !!codexPlusSettings().serviceTierControls;
     const backendConnected = codexPlusBackendStatus.status === "ok";
-    const backendChecking = codexPlusBackendStatus.status === "checking";
     if (featureEnabled && backendConnected) codexServiceTierMaybeLoadModelCatalog();
     const fastAvailability = codexServiceTierFastAvailability();
-    const fastDisabled = !featureEnabled || !backendConnected || codexServiceTierState.status === "loading" || !fastAvailability.supported;
+    const fastDisabled = !featureEnabled || codexServiceTierState.status === "loading" || !fastAvailability.supported;
     const fastTitle = fastAvailability.supported
       ? "Fast：使用 service_tier=\"priority\""
       : codexServiceTierFastUnsupportedMessage(fastAvailability.modelName);
@@ -1907,17 +2050,15 @@
       node.hidden = !featureEnabled;
     });
     document.querySelectorAll("[data-codex-service-tier-status]").forEach((node) => {
-      node.dataset.status = fastUnsupportedActive ? "unsupported" : (featureEnabled && backendConnected ? (codexServiceTierState.status || "loading") : (backendChecking ? "loading" : "failed"));
-      node.textContent = featureEnabled
-        ? (backendConnected ? (codexServiceTierState.message || "未读取") : (backendChecking ? "正在检查后端…" : "未连接"))
-        : "未启用";
+      node.dataset.status = fastUnsupportedActive ? "unsupported" : (featureEnabled ? (codexServiceTierState.status || "loading") : "idle");
+      node.textContent = featureEnabled ? (codexServiceTierState.message || "未读取") : "未启用";
     });
     document.querySelectorAll("[data-codex-service-tier-inherit]").forEach((button) => {
-      button.disabled = !featureEnabled || !backendConnected || codexServiceTierState.status === "loading";
+      button.disabled = !featureEnabled || codexServiceTierState.status === "loading";
       button.dataset.active = String(codexServiceTierState.controlMode === "inherit");
     });
     document.querySelectorAll("[data-codex-service-tier-standard]").forEach((button) => {
-      button.disabled = !featureEnabled || !backendConnected || codexServiceTierState.status === "loading";
+      button.disabled = !featureEnabled || codexServiceTierState.status === "loading";
       button.dataset.active = String(codexServiceTierState.controlMode === "global-standard");
     });
     document.querySelectorAll("[data-codex-service-tier-fast]").forEach((button) => {
@@ -1926,16 +2067,16 @@
       button.title = fastTitle;
     });
     document.querySelectorAll("[data-codex-service-tier-custom]").forEach((button) => {
-      button.disabled = !featureEnabled || !backendConnected || codexServiceTierState.status === "loading";
+      button.disabled = !featureEnabled || codexServiceTierState.status === "loading";
       button.dataset.active = String(codexServiceTierState.controlMode === "custom");
     });
     document.querySelectorAll("[data-codex-service-tier-thread-inherit]").forEach((button) => {
-      button.disabled = !featureEnabled || !backendConnected || codexServiceTierState.status === "loading";
+      button.disabled = !featureEnabled || codexServiceTierState.status === "loading";
       button.dataset.active = String(codexServiceTierState.controlMode === "custom" && codexServiceTierState.threadMode === "inherit");
       button.title = `当前 thread 不单独覆盖，继承自定义默认 ${codexServiceTierState.defaultMode || "inherit"}`;
     });
     document.querySelectorAll("[data-codex-service-tier-thread-standard]").forEach((button) => {
-      button.disabled = !featureEnabled || !backendConnected || codexServiceTierState.status === "loading";
+      button.disabled = !featureEnabled || codexServiceTierState.status === "loading";
       button.dataset.active = String(codexServiceTierState.controlMode === "custom" && codexServiceTierState.threadMode === "standard");
     });
     document.querySelectorAll("[data-codex-service-tier-thread-fast]").forEach((button) => {
@@ -1946,16 +2087,21 @@
     refreshCodexServiceTierBadges();
   }
 
-  async function loadCodexServiceTierState() {
+  async function loadCodexServiceTierState(options = {}) {
+    const revision = ++codexServiceTierStateLoadRevision;
+    const silent = options?.silent === true;
     if (!codexPlusSettings().serviceTierControls) {
       codexServiceTierState = { ...codexServiceTierState, status: "idle", message: "未启用" };
       refreshCodexServiceTierControls();
       return;
     }
-    codexServiceTierState = { ...codexServiceTierState, status: "loading", message: "正在读取…" };
-    refreshCodexServiceTierControls();
+    if (!silent) {
+      codexServiceTierState = { ...codexServiceTierState, status: "loading", message: "正在读取…" };
+      refreshCodexServiceTierControls();
+    }
     try {
       const serviceTier = await getCodexServiceTierSetting();
+      if (revision !== codexServiceTierStateLoadRevision) return;
       codexServiceTierState = {
         ...codexServiceTierState,
         status: "ok",
@@ -1963,6 +2109,7 @@
         message: serviceTierGlobalStatusMessage(serviceTier),
       };
     } catch (error) {
+      if (revision !== codexServiceTierStateLoadRevision) return;
       codexServiceTierState = {
         ...codexServiceTierState,
         status: "failed",
@@ -1973,16 +2120,11 @@
         errorMessage: error?.message || String(error),
       });
     } finally {
-      refreshCodexServiceTierControls();
+      if (revision === codexServiceTierStateLoadRevision) refreshCodexServiceTierControls();
     }
   }
 
   function setCodexThreadServiceTierMode(mode) {
-    if (codexPlusBackendStatus.status !== "ok") {
-      showToast("后端未连接，无法切换服务模式", null);
-      refreshCodexServiceTierControls();
-      return;
-    }
     const normalizedMode = normalizeCodexThreadServiceTierMode(mode);
     if (normalizedMode === "fast") {
       const fastAvailability = codexServiceTierFastAvailability();
@@ -2001,11 +2143,6 @@
   }
 
   function toggleCodexServiceTierFromBadge() {
-    if (codexPlusBackendStatus.status !== "ok") {
-      showToast("后端未连接，无法切换服务模式", null);
-      refreshCodexServiceTierControls();
-      return;
-    }
     syncCodexServiceTierEffectiveState();
     const nextMode = codexServiceTierState.effectiveMode === "fast" ? "standard" : "fast";
     if (nextMode === "fast") {
@@ -2143,27 +2280,48 @@
     return message;
   }
 
+  function codexServiceTierDispatcherFromModule(module) {
+    const values = module && typeof module === "object" ? Object.values(module) : [];
+    const singleton = values.find((candidate) => candidate
+      && typeof candidate === "object"
+      && typeof candidate.dispatchMessage === "function"
+      && typeof candidate.subscribe === "function");
+    if (singleton) return singleton;
+    const dispatcherClass = values.find((candidate) => typeof candidate === "function"
+      && typeof candidate.getInstance === "function"
+      && typeof candidate.prototype?.dispatchMessage === "function");
+    return dispatcherClass?.getInstance?.() || null;
+  }
+
   function installCodexServiceTierDispatcherPatch() {
     if (window.__codexServiceTierRequestOverrideInstalled === codexServiceTierRequestOverrideVersion) return;
+    const loadDispatcher = async () => {
+      const errors = [];
+      for (const assetPrefix of ["setting-storage-", "vscode-api-"]) {
+        try {
+          const module = await loadCodexAppModule(assetPrefix);
+          const dispatcher = codexServiceTierDispatcherFromModule(module);
+          if (dispatcher) return { dispatcher, assetPrefix };
+          errors.push(`${assetPrefix}: dispatcher export unavailable`);
+        } catch (error) {
+          errors.push(`${assetPrefix}: ${error?.message || String(error)}`);
+        }
+      }
+      throw new Error(`Codex dispatcher unavailable (${errors.join("; ")})`);
+    };
     const patch = async () => {
       try {
-        const module = await loadCodexAppModule("setting-storage-");
-        const dispatcherClass = typeof module.v === "function" && String(module.v).includes("dispatchMessage") ? module.v : null;
-        const dispatcher = dispatcherClass?.getInstance?.();
-        if (!dispatcher || typeof dispatcher.dispatchMessage !== "function") throw new Error("Codex dispatcher unavailable");
+        const { dispatcher, assetPrefix } = await loadDispatcher();
         if (dispatcher.__codexServiceTierOriginalDispatchMessage) {
           window.__codexServiceTierRequestOverrideInstalled = codexServiceTierRequestOverrideVersion;
           return;
         }
         dispatcher.__codexServiceTierOriginalDispatchMessage = dispatcher.dispatchMessage.bind(dispatcher);
         dispatcher.dispatchMessage = (type, payload) => {
-          const message = codexServiceTierRequestOverride({ ...(payload || {}), type });
-          const nextType = message?.type || type;
-          const { type: _type, ...nextPayload } = message || {};
-          return dispatcher.__codexServiceTierOriginalDispatchMessage(nextType, nextPayload);
+          return dispatchCodexPlusMessage(dispatcher, type, payload);
         };
         window.__codexServiceTierRequestOverrideInstalled = codexServiceTierRequestOverrideVersion;
-        sendCodexPlusDiagnostic("service_tier_dispatcher_patch_installed", {});
+        sendCodexPlusDiagnostic("service_tier_dispatcher_patch_installed", { assetPrefix });
       } catch (error) {
         sendCodexPlusDiagnostic("service_tier_dispatcher_patch_failed", {
           errorName: error?.name || "",
@@ -2197,7 +2355,7 @@
   function loadBackendSettingsForStartup(attempt = 0) {
     loadBackendSettings().then((loaded) => {
       if (loaded) {
-        scan();
+        scan(true);
         return;
       }
       if (attempt < 60) {
@@ -2228,12 +2386,15 @@
     });
     syncStepwisePanel();
     renderCodexPlusMenu();
-    scan();
+    scan(true);
   }
 
   let codexPlusUserScripts = { enabled: true, builtin_dir: "", user_dir: "", scripts: [] };
   let codexPlusBackendStatus = { status: "checking", message: "正在检查后端…" };
   let codexPlusBackendCheckSeq = 0;
+  let codexApiModeState = { status: "idle", active: false, mode: "unknown", message: "" };
+  let codexApiModeLoadedAt = 0;
+  let codexApiModePromise = null;
 
   function setCodexPlusTriggerLabel(trigger) {
     if (!trigger) return;
@@ -2299,6 +2460,161 @@
       });
     }
     renderBackendStatus();
+    if (nextStatus?.status === "ok") void loadCodexApiModeState();
+  }
+
+  async function loadCodexApiModeState(force = false) {
+    if (!force && codexApiModeState.status === "ok" && Date.now() - codexApiModeLoadedAt < 5000) {
+      return codexApiModeState;
+    }
+    if (codexApiModePromise) return codexApiModePromise;
+    codexApiModeState = { ...codexApiModeState, status: "loading" };
+    codexApiModePromise = postJson("/api-mode/status", {})
+      .then((result) => {
+        codexApiModeState = result && typeof result === "object"
+          ? result
+          : { status: "failed", active: false, mode: "unknown", message: "读取 API 登录状态失败" };
+        codexApiModeLoadedAt = Date.now();
+        installCodexApiLogoutMenuItem();
+        return codexApiModeState;
+      })
+      .catch((error) => {
+        codexApiModeState = {
+          status: "failed",
+          active: false,
+          mode: "unknown",
+          message: error?.message || String(error),
+        };
+        return codexApiModeState;
+      })
+      .finally(() => {
+        codexApiModePromise = null;
+      });
+    return codexApiModePromise;
+  }
+
+  function confirmApiModeLogout() {
+    document.querySelectorAll(".codex-api-logout-confirm").forEach((node) => node.remove());
+    return new Promise((resolve) => {
+      const overlay = document.createElement("div");
+      overlay.className = "codex-delete-confirm-overlay codex-api-logout-confirm";
+      overlay.innerHTML = `
+        <div class="codex-delete-confirm-content" role="dialog" aria-modal="true" aria-label="退出 API 登录">
+          <div class="codex-delete-confirm-title">退出 API 登录</div>
+          <div class="codex-delete-confirm-message">将停止 Codex 当前的 API 模式并恢复之前保留的官方账号配置。不会删除 Codex Compass 中保存的供应商、API Key 或模型映射。退出后需要重启 Codex。</div>
+          <div class="codex-delete-confirm-actions">
+            <button type="button" data-codex-api-logout-cancel="true">取消</button>
+            <button type="button" data-codex-api-logout-confirm="true">退出 API 登录</button>
+          </div>
+        </div>
+      `;
+      const finish = (value, event) => {
+        event?.preventDefault();
+        event?.stopPropagation();
+        overlay.remove();
+        resolve(value);
+      };
+      overlay.addEventListener("click", (event) => {
+        const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+        if (event.target === overlay || target?.closest("[data-codex-api-logout-cancel]")) {
+          finish(false, event);
+          return;
+        }
+        if (target?.closest("[data-codex-api-logout-confirm]")) finish(true, event);
+      }, true);
+      overlay.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") finish(false, event);
+      }, true);
+      document.body.appendChild(overlay);
+      overlay.querySelector("[data-codex-api-logout-cancel]")?.focus();
+    });
+  }
+
+  function codexApiLogoutMenuRoot(item) {
+    return item?.closest?.("[role='menu'], [data-radix-menu-content], [data-radix-popper-content-wrapper]") || null;
+  }
+
+  function codexApiLogoutLooksLikeAccountMenu(menu) {
+    if (!menu) return false;
+    const text = String(menu.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const providerNames = uniqueValues([
+      "custom",
+      codexModelCatalog.provider_name,
+      codexModelCatalog.model_provider,
+    ]).map((value) => String(value).toLowerCase());
+    if (/(显示宠物|show pet)/i.test(text)) return true;
+    if (providerNames.some((name) => name && text.includes(name))) return true;
+    const rect = menu.getBoundingClientRect?.();
+    return !!rect
+      && rect.width > 0
+      && rect.height > 0
+      && rect.left < window.innerWidth * 0.45
+      && rect.bottom > window.innerHeight * 0.55;
+  }
+
+  function codexApiLogoutSettingsItem() {
+    return Array.from(document.querySelectorAll("[role='menuitem'], [data-radix-collection-item]"))
+      .filter((item) => item instanceof HTMLElement && item.getBoundingClientRect().width > 0)
+      .find((item) => {
+        const label = String(item.textContent || "").replace(/\s+/g, " ").trim();
+        if (!/^(设置|Settings)(?:\s+Ctrl\+,)?$/i.test(label)) return false;
+        return codexApiLogoutLooksLikeAccountMenu(codexApiLogoutMenuRoot(item));
+      }) || null;
+  }
+
+  function createCodexApiLogoutMenuItem(settingsItem) {
+    const item = settingsItem.cloneNode(true);
+    item.removeAttribute("id");
+    item.removeAttribute("aria-controls");
+    item.removeAttribute("aria-expanded");
+    item.removeAttribute("data-state");
+    item.removeAttribute("data-highlighted");
+    item.dataset.codexApiLogout = "true";
+    item.setAttribute("aria-label", "退出 API 登录");
+    if (item instanceof HTMLButtonElement) item.type = "button";
+    item.innerHTML = `
+      <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10 17l5-5-5-5"></path>
+        <path d="M15 12H3"></path>
+        <path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5"></path>
+      </svg>
+      <span>退出 API 登录</span>
+    `;
+    item.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!(await confirmApiModeLogout())) return;
+      item.setAttribute("aria-disabled", "true");
+      if ("disabled" in item) item.disabled = true;
+      const result = await postJson("/api-mode/logout", {});
+      if (result?.status !== "ok") {
+        item.removeAttribute("aria-disabled");
+        if ("disabled" in item) item.disabled = false;
+        showToast(result?.message || "退出 API 登录失败", null);
+        return;
+      }
+      codexApiModeState = { ...result, status: "ok", active: false };
+      codexApiModeLoadedAt = Date.now();
+      document.querySelectorAll("[data-codex-api-logout]").forEach((node) => node.remove());
+      showToast(result.message || "已退出 API 登录，请重启 Codex", null);
+    }, true);
+    return item;
+  }
+
+  function installCodexApiLogoutMenuItem() {
+    if (codexApiModeState.status === "idle" || codexApiModeState.status === "failed") {
+      if (codexPlusBackendStatus.status === "ok") void loadCodexApiModeState();
+      return;
+    }
+    if (codexApiModeState.status !== "ok") return;
+    if (!codexApiModeState.active) {
+      document.querySelectorAll("[data-codex-api-logout]").forEach((node) => node.remove());
+      return;
+    }
+    const settingsItem = codexApiLogoutSettingsItem();
+    if (!settingsItem || settingsItem.parentElement?.querySelector("[data-codex-api-logout]")) return;
+    const item = createCodexApiLogoutMenuItem(settingsItem);
+    settingsItem.insertAdjacentElement("afterend", item);
   }
 
   async function openManagerFromCodex() {
@@ -2480,15 +2796,7 @@
               <button type="button" class="codex-plus-action-button" data-codex-open-devtools="true">打开 DevTools</button>
             </div>
             <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">关于 Codex_Plus</div><div class="codex-plus-about">Codex_Plus 通过单一桌面应用启动 Codex 并注入增强菜单，不修改 Codex App 原始安装文件。<br>Build: <span data-codex-plus-build="true">${codexPlusBuild}</span><br>GitHub: <a href="https://github.com/BigPizzaV3/CodexPlusPlus" target="_blank" rel="noreferrer">https://github.com/BigPizzaV3/CodexPlusPlus</a><br>Discord: <a href="https://discord.gg/y96kX7A76v" target="_blank" rel="noreferrer">https://discord.gg/y96kX7A76v</a><br>Telegram: <a href="https://t.me/CodexPlusPlus" target="_blank" rel="noreferrer">https://t.me/CodexPlusPlus</a></div></div>
-            </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">Discord 社区</div><div class="codex-plus-row-description">加入 Discord 获取更新消息、反馈问题或交流使用体验。</div></div>
-              <button type="button" class="codex-plus-action-button" data-codex-plus-discord="true">打开 Discord</button>
-            </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">Telegram 频道</div><div class="codex-plus-row-description">加入 Telegram 获取更新消息和交流使用体验。</div></div>
-              <button type="button" class="codex-plus-action-button" data-codex-plus-telegram="true">打开 Telegram</button>
+              <div><div class="codex-plus-row-title">关于 Codex_Plus</div><div class="codex-plus-about">Codex_Plus 通过单一桌面应用启动 Codex 并注入增强菜单，不修改 Codex App 原始安装文件。<br>Build: <span data-codex-plus-build="true">${codexPlusBuild}</span><br>GitHub: <a href="https://github.com/BigPizzaV3/CodexPlusPlus" target="_blank" rel="noreferrer">https://github.com/BigPizzaV3/CodexPlusPlus</a></div></div>
             </div>
             <div class="codex-plus-row">
               <div><div class="codex-plus-row-title">提出问题</div><div class="codex-plus-row-description">打开 GitHub Issues 反馈问题或建议。</div></div>
@@ -2550,14 +2858,6 @@
       }
       if (target?.closest("[data-codex-open-manager]")) {
         openManagerFromCodex();
-        return;
-      }
-      if (target?.closest("[data-codex-plus-discord]")) {
-        window.open("https://discord.gg/y96kX7A76v", "_blank");
-        return;
-      }
-      if (target?.closest("[data-codex-plus-telegram]")) {
-        window.open("https://t.me/CodexPlusPlus", "_blank");
         return;
       }
       const issueButton = target?.closest("[data-codex-plus-issue]");
@@ -2712,8 +3012,8 @@
       indicator.dataset.status = codexPlusBackendStatus.status || "checking";
       trigger.prepend(indicator);
     }
-    if (trigger.dataset.codexPlusTriggerInstalled === "5") return;
-    trigger.dataset.codexPlusTriggerInstalled = "5";
+    if (trigger.dataset.codexPlusTriggerInstalled === "7") return;
+    trigger.dataset.codexPlusTriggerInstalled = "7";
     trigger.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -2782,7 +3082,7 @@
     const existing = document.getElementById(codexPlusMenuId);
     removeDuplicateCodexPlusMenus(existing);
     let insertionPoint = findNativeMenuInsertionPoint();
-    if (existing && existing.dataset.codexPlusMenuVersion !== "6") {
+    if (existing && existing.dataset.codexPlusMenuVersion !== "8") {
       existing.remove();
       insertionPoint = findNativeMenuInsertionPoint();
     } else if (existing && insertionPoint && existing.parentElement === insertionPoint.parent) {
@@ -2809,7 +3109,7 @@
     const menu = document.createElement("div");
     menu.id = codexPlusMenuId;
     menu.dataset.codexPlusMenu = "true";
-    menu.dataset.codexPlusMenuVersion = "6";
+    menu.dataset.codexPlusMenuVersion = "8";
     const trigger = document.createElement("button");
     trigger.type = "button";
     const indicator = ensureCodexPlusTriggerIndicator(trigger);
@@ -3106,6 +3406,7 @@
 
   function pluginAutoExpandVisibleElement(el) {
     if (!(el instanceof HTMLElement) || !el.isConnected) return false;
+    if (!el.getClientRects().length) return false;
     const style = getComputedStyle(el);
     if (style.display === "none" || style.visibility === "hidden" || style.pointerEvents === "none") return false;
     const rect = el.getBoundingClientRect();
@@ -3113,14 +3414,35 @@
   }
 
   function pluginAutoExpandPageLooksRelevant() {
-    const text = String(document.body?.innerText || "");
-    return /插件|Plugins?|Marketplace|市场/i.test(text) && !!document.querySelector('button, [role="button"]');
+    const now = Date.now();
+    const cached = window.__codexPluginAutoExpandPageCache;
+    if (cached && now - cached.at < codexPluginAutoExpandPageCacheTtlMs) return cached.value;
+    const explicitScope = document.querySelector([
+      '[data-testid*="plugin" i]',
+      '[data-testid*="marketplace" i]',
+      '[aria-label*="plugin" i]',
+      '[aria-label*="marketplace" i]',
+      'a[href*="plugin" i]',
+      'a[href*="marketplace" i]',
+    ].join(", "));
+    const scopeTextMatches = explicitScope || Array.from(
+      document.querySelectorAll("h1, h2, h3, [role='heading'], nav, aside"),
+    ).slice(0, 80).some((node) => /插件|Plugins?|Marketplace|市场/i.test(String(node.textContent || "").slice(0, 800)));
+    const value = !!scopeTextMatches && !!document.querySelector('button, [role="button"]');
+    window.__codexPluginAutoExpandPageCache = { at: now, value };
+    return value;
   }
 
   function pluginAutoExpandButtonLooksScoped(button) {
     let node = button;
     for (let depth = 0; node instanceof HTMLElement && node !== document.body && depth < 8; depth += 1, node = node.parentElement) {
-      const text = String(node.innerText || "");
+      if (node.matches?.([
+        '[data-testid*="plugin" i]',
+        '[data-testid*="marketplace" i]',
+        '[aria-label*="plugin" i]',
+        '[aria-label*="marketplace" i]',
+      ].join(", "))) return true;
+      const text = String(node.textContent || "");
       if (text.length > 16000) continue;
       if (/插件|Plugins?|Marketplace|市场/i.test(text)) return true;
     }
@@ -3146,19 +3468,16 @@
   function pluginAutoExpandButtonCandidates() {
     if (!codexPlusSettings().pluginAutoExpand || !pluginAutoExpandPageLooksRelevant()) return [];
     return Array.from(document.querySelectorAll('button, [role="button"]'))
-      .filter(pluginAutoExpandVisibleElement)
       .filter((button) => !button.disabled && button.getAttribute("aria-disabled") !== "true")
       .filter(pluginAutoExpandButtonLooksLikeMore)
       .filter(pluginAutoExpandButtonLooksScoped)
-      .filter((button) => !button.closest?.(`.${moreMenuClass}, #${codexPlusMenuId}, .codex-plus-modal-overlay`));
+      .filter((button) => !button.closest?.(`.${moreMenuClass}, #${codexPlusMenuId}, .codex-plus-modal-overlay`))
+      .filter(pluginAutoExpandVisibleElement);
   }
 
   function pluginAutoExpandSignature() {
     return pluginAutoExpandButtonCandidates()
-      .map((button) => {
-        const rect = button.getBoundingClientRect();
-        return `${pluginAutoExpandButtonText(button)}:${Math.round(rect.top)}:${Math.round(rect.left)}`;
-      })
+      .map((button, index) => `${pluginAutoExpandButtonText(button)}:${button.getAttribute("aria-controls") || ""}:${index}`)
       .join("|");
   }
 
@@ -3502,6 +3821,26 @@
     return cachedSessionRows;
   }
 
+  function sessionRowsFromMutations(mutations, forceRefresh = false) {
+    if (forceRefresh || !Array.isArray(mutations) || mutations.length === 0) return sessionRows(forceRefresh);
+    const rows = new Set();
+    for (const mutation of mutations) {
+      const targetRow = mutation.target?.closest?.(selectors.sidebarThread);
+      if (targetRow instanceof HTMLElement) rows.add(targetRow);
+      for (const node of mutation.addedNodes || []) {
+        if (!(node instanceof HTMLElement)) continue;
+        if (node.matches(selectors.sidebarThread)) rows.add(node);
+        node.querySelectorAll?.(selectors.sidebarThread).forEach((row) => rows.add(row));
+      }
+    }
+    cachedSessionRowsAt = 0;
+    const sharedMenu = document.getElementById(sharedMoreMenuId);
+    if (sharedMenu && !sharedMenu.__codexSessionMoreRow?.isConnected) {
+      closeSessionMoreMenu(sharedMenu, true);
+    }
+    return Array.from(rows);
+  }
+
   function archivePageHintVisible() {
     if (window.location.href.includes("archive")) return true;
     if (document.querySelector('[data-codex-archive-page-row="true"], [data-codex-archive-delete-all]')) return true;
@@ -3648,7 +3987,7 @@
     row.dataset.codexThreadIdBadgeVersion = codexThreadIdBadgeVersion;
   }
 
-  function refreshThreadIdBadges() {
+  function refreshThreadIdBadges(rows = null) {
     if (!codexPlusSettings().threadIdBadge) {
       if (threadIdBadgeActive) {
         removeThreadIdBadges();
@@ -3656,8 +3995,9 @@
       }
       return;
     }
+    const targetRows = threadIdBadgeActive && Array.isArray(rows) ? rows : sessionRows();
     threadIdBadgeActive = true;
-    sessionRows().forEach(installThreadIdBadge);
+    targetRows.forEach(installThreadIdBadge);
   }
 
   function codexPlusDiagnosticPayload(event, detail) {
@@ -3681,20 +4021,28 @@
     }
     if (window.__codexSessionDeleteBridge) {
       window.__codexSessionDeleteBridge("/diagnostics/log", payload).catch(() => {});
+      return;
     }
+    if (!/^https?:$/i.test(window.location?.protocol || "")) return;
+    if (window.__codexPlusDiagnosticHttpDisabled) return;
     const body = JSON.stringify(payload);
     try {
       if (navigator.sendBeacon) {
         const blob = new Blob([body], { type: "application/json" });
         if (navigator.sendBeacon(`${helperBase}/diagnostics/log`, blob)) return;
       }
-    } catch (_) {}
+    } catch (_) {
+      window.__codexPlusDiagnosticHttpDisabled = true;
+      return;
+    }
     fetch(`${helperBase}/diagnostics/log`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
       keepalive: true,
-    }).catch(() => {});
+    }).catch(() => {
+      window.__codexPlusDiagnosticHttpDisabled = true;
+    });
   }
 
   sendCodexPlusDiagnostic("script_loaded", {
@@ -4474,6 +4822,426 @@
     return await codexStateCall("set-global-state", { params: { key, value } });
   }
 
+  const codexProjectlessMainWindowStateDefaults = {
+    loaded: false,
+    enabled: false,
+    intent: "",
+    source: "",
+    revision: 0,
+    contextRevision: 0,
+    draftContext: null,
+    contextPromise: null,
+    lastGenericBeginAt: 0,
+    homeRouteRevision: -1,
+  };
+  const codexProjectlessMainWindowState = window.__codexProjectlessMainWindowState
+    && typeof window.__codexProjectlessMainWindowState === "object"
+    ? window.__codexProjectlessMainWindowState
+    : {};
+  Object.entries(codexProjectlessMainWindowStateDefaults).forEach(([key, value]) => {
+    if (!Object.prototype.hasOwnProperty.call(codexProjectlessMainWindowState, key)) {
+      codexProjectlessMainWindowState[key] = value;
+    }
+  });
+  window.__codexProjectlessMainWindowState = codexProjectlessMainWindowState;
+
+  function codexProjectlessMainWindowEnabled() {
+    return codexProjectlessMainWindowState.loaded
+      && codexProjectlessMainWindowState.enabled
+      && codexPlusBackendSettings.enhancementsEnabled !== false;
+  }
+
+  function clearCodexProjectlessMainWindowTimers() {
+    (window.__codexProjectlessMainWindowTimers || []).forEach((timer) => clearTimeout(timer));
+    window.__codexProjectlessMainWindowTimers = [];
+  }
+
+  function setCodexProjectlessMainWindowIntent(intent, source) {
+    const normalizedIntent = intent === "generic" || intent === "project" ? intent : "";
+    codexProjectlessMainWindowState.intent = normalizedIntent;
+    codexProjectlessMainWindowState.source = String(source || "");
+    codexProjectlessMainWindowState.revision += 1;
+    codexProjectlessMainWindowState.contextRevision = codexProjectlessMainWindowState.revision;
+    codexProjectlessMainWindowState.draftContext = null;
+    codexProjectlessMainWindowState.contextPromise = null;
+    if (normalizedIntent !== "generic") clearCodexProjectlessMainWindowTimers();
+  }
+
+  function codexProjectlessMainWindowShouldEnforce() {
+    return codexProjectlessMainWindowEnabled()
+      && codexProjectlessMainWindowState.intent === "generic";
+  }
+
+  function codexProjectlessContextValid(context) {
+    return !!context
+      && typeof context === "object"
+      && typeof context.cwd === "string"
+      && context.cwd.trim().length > 0
+      && typeof context.projectlessOutputDirectory === "string"
+      && context.projectlessOutputDirectory.trim().length > 0
+      && Array.isArray(context.workspaceRoots)
+      && context.workspaceRoots.length > 0;
+  }
+
+  function codexProjectlessPromptFromValue(value, visited = new WeakSet(), depth = 0) {
+    if (typeof value === "string") return depth > 0 ? value.trim() : "";
+    if (!value || typeof value !== "object" || depth > 5 || visited.has(value)) return "";
+    visited.add(value);
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item?.type === "text" && typeof item.text === "string" && item.text.trim()) return item.text.trim();
+        const prompt = codexProjectlessPromptFromValue(item, visited, depth + 1);
+        if (prompt) return prompt;
+      }
+      return "";
+    }
+    for (const key of ["input", "prompt", "message", "params", "request", "payload"]) {
+      const prompt = codexProjectlessPromptFromValue(value[key], visited, depth + 1);
+      if (prompt) return prompt;
+    }
+    return "";
+  }
+
+  async function prepareCodexProjectlessDraftContext(prompt = "") {
+    if (!codexProjectlessMainWindowShouldEnforce()) return null;
+    const revision = codexProjectlessMainWindowState.revision;
+    if (codexProjectlessMainWindowState.contextRevision === revision
+        && codexProjectlessContextValid(codexProjectlessMainWindowState.draftContext)) {
+      return codexProjectlessMainWindowState.draftContext;
+    }
+    if (codexProjectlessMainWindowState.contextRevision === revision
+        && codexProjectlessMainWindowState.contextPromise) {
+      return await codexProjectlessMainWindowState.contextPromise;
+    }
+    const contextPromise = Promise.resolve().then(async () => {
+      const module = await loadCodexAppModule("projectless-thread-");
+      if (typeof module.n !== "function") throw new Error("Codex projectless-thread 生成器不可用");
+      const options = String(prompt || "").trim() ? { prompt: String(prompt).trim() } : {};
+      const context = await module.n(["~"], options);
+      if (!codexProjectlessContextValid(context)) throw new Error("Codex projectless-thread 返回了无效目录");
+      return {
+        cwd: context.cwd,
+        projectlessOutputDirectory: context.projectlessOutputDirectory,
+        workspaceRoots: [...context.workspaceRoots],
+      };
+    });
+    codexProjectlessMainWindowState.contextRevision = revision;
+    codexProjectlessMainWindowState.contextPromise = contextPromise;
+    try {
+      const context = await contextPromise;
+      if (revision === codexProjectlessMainWindowState.revision
+          && codexProjectlessMainWindowShouldEnforce()) {
+        codexProjectlessMainWindowState.draftContext = context;
+      }
+      return context;
+    } finally {
+      if (codexProjectlessMainWindowState.contextPromise === contextPromise) {
+        codexProjectlessMainWindowState.contextPromise = null;
+      }
+    }
+  }
+
+  function codexProjectlessStartParams(message) {
+    if (!message || typeof message !== "object") return null;
+    if (message.type === "send-cli-request-for-host" && message.method === "thread/start") return message.params;
+    if ((message.type === "mcp-request" || message.type === "worker-request")
+        && message.request?.method === "thread/start") return message.request.params;
+    if (message.type === "thread-prewarm-start" && message.request?.params) return message.request.params;
+    if (message.type === "prewarm-thread-start-for-host" && message.params) return message.params;
+    if (message.type === "start-conversation" || message.type === "start-thread-for-host") return message;
+    return null;
+  }
+
+  function patchCodexProjectlessStartParams(params, context) {
+    if (!params || typeof params !== "object" || !codexProjectlessContextValid(context)) return params;
+    const next = {
+      ...params,
+      cwd: context.cwd,
+      workspaceRoots: [...context.workspaceRoots],
+      workspaceKind: "projectless",
+      projectlessOutputDirectory: context.projectlessOutputDirectory,
+    };
+    delete next.projectAssignment;
+    if (next.permissions && typeof next.permissions === "object") {
+      const permissions = { ...next.permissions, runtimeWorkspaceRoots: [...context.workspaceRoots] };
+      if (permissions.sandboxPolicy?.type === "workspaceWrite") {
+        permissions.sandboxPolicy = {
+          ...permissions.sandboxPolicy,
+          writableRoots: [...context.workspaceRoots],
+        };
+      }
+      next.permissions = permissions;
+    }
+    return next;
+  }
+
+  function applyCodexProjectlessRequestOverride(message, context) {
+    const params = codexProjectlessStartParams(message);
+    if (!params) return message;
+    const nextParams = patchCodexProjectlessStartParams(params, context);
+    if (nextParams === params) return message;
+    if (message.type === "send-cli-request-for-host") return { ...message, params: nextParams };
+    if (message.type === "mcp-request" || message.type === "worker-request") {
+      return { ...message, request: { ...message.request, params: nextParams } };
+    }
+    if (message.type === "thread-prewarm-start") {
+      return { ...message, request: { ...message.request, params: nextParams } };
+    }
+    if (message.type === "prewarm-thread-start-for-host") return { ...message, params: nextParams };
+    return nextParams;
+  }
+
+  function codexProjectlessRequestNeedsOverride(message) {
+    if (!codexProjectlessMainWindowShouldEnforce()) return false;
+    const params = codexProjectlessStartParams(message);
+    if (!params) return false;
+    return params.workspaceKind !== "projectless"
+      || typeof params.projectlessOutputDirectory !== "string"
+      || !params.projectlessOutputDirectory.trim();
+  }
+
+  function dispatchCodexPlusMessage(dispatcher, type, payload) {
+    const originalMessage = { ...(payload || {}), type };
+    const dispatch = (message) => {
+      const serviceTierMessage = codexServiceTierRequestOverride(message);
+      const nextType = serviceTierMessage?.type || type;
+      const { type: _type, ...nextPayload } = serviceTierMessage || {};
+      return dispatcher.__codexServiceTierOriginalDispatchMessage(nextType, nextPayload);
+    };
+    if (!codexProjectlessRequestNeedsOverride(originalMessage)) return dispatch(originalMessage);
+    const revision = codexProjectlessMainWindowState.revision;
+    const prompt = codexProjectlessPromptFromValue(originalMessage);
+    return prepareCodexProjectlessDraftContext(prompt).then((context) => {
+      if (revision !== codexProjectlessMainWindowState.revision
+          || !codexProjectlessMainWindowShouldEnforce()) {
+        return dispatch(originalMessage);
+      }
+      const message = applyCodexProjectlessRequestOverride(originalMessage, context);
+      sendCodexPlusDiagnostic("projectless_thread_start_overridden", {
+        type: String(type || ""),
+        workspaceRootCount: context.workspaceRoots.length,
+        hasOutputDirectory: !!context.projectlessOutputDirectory,
+      });
+      return dispatch(message);
+    }).catch((error) => {
+      sendCodexPlusDiagnostic("projectless_thread_start_override_failed", {
+        type: String(type || ""),
+        errorName: error?.name || "",
+        errorMessage: error?.message || String(error),
+      });
+      showToast("无项目会话准备失败，请重试", null);
+      throw error;
+    });
+  }
+
+  function codexProjectlessMainWindowLooksLikeHome() {
+    return Array.from(document.querySelectorAll("button, [role='button']")).some((element) => {
+      const label = String(
+        element.getAttribute?.("aria-label")
+        || element.getAttribute?.("title")
+        || element.innerText
+        || element.textContent
+        || ""
+      ).replace(/\s+/g, " ").trim();
+      return /^(select|choose) project$/i.test(label) || /^(选择|选取)项目$/.test(label);
+    });
+  }
+
+  async function navigateCodexProjectlessMainWindowHome(source, revision) {
+    if (!codexProjectlessMainWindowShouldEnforce()
+        || revision !== codexProjectlessMainWindowState.revision
+        || codexProjectlessMainWindowState.homeRouteRevision === revision
+        || !codexProjectlessMainWindowLooksLikeHome()) {
+      return false;
+    }
+    const module = await loadCodexAppModule("vscode-api-");
+    const dispatcher = module?.g;
+    if (!dispatcher || typeof dispatcher.dispatchHostMessage !== "function") {
+      throw new Error("Codex 内部导航接口不可用");
+    }
+    dispatcher.dispatchHostMessage({
+      type: "navigate-to-route",
+      path: "/",
+      state: { focusComposerNonce: Date.now() },
+    });
+    codexProjectlessMainWindowState.homeRouteRevision = revision;
+    sendCodexPlusDiagnostic("projectless_main_window_home_route_cleared", {
+      source: String(source || "runtime"),
+    });
+    return true;
+  }
+
+  async function enforceCodexProjectlessMainWindow(source, revision) {
+    if (!codexProjectlessMainWindowShouldEnforce()) return false;
+    if (revision != null && revision !== codexProjectlessMainWindowState.revision) return false;
+    let changed = false;
+    try {
+      const activeRoots = await getCodexGlobalState("active-workspace-roots").catch(() => null);
+      if (!codexProjectlessMainWindowShouldEnforce()) return false;
+      if (revision != null && revision !== codexProjectlessMainWindowState.revision) return false;
+      if (!Array.isArray(activeRoots) || activeRoots.length > 0) {
+        await setCodexGlobalState("active-workspace-roots", []);
+        sendCodexPlusDiagnostic("projectless_main_window_runtime_prepared", {
+          source: String(source || "runtime"),
+          previousRootCount: Array.isArray(activeRoots) ? activeRoots.length : activeRoots == null ? 0 : 1,
+        });
+        changed = true;
+      }
+      if (await navigateCodexProjectlessMainWindowHome(
+        source,
+        revision == null ? codexProjectlessMainWindowState.revision : revision
+      )) changed = true;
+    } catch (error) {
+      sendCodexPlusDiagnostic("projectless_main_window_runtime_failed", {
+        source: String(source || "runtime"),
+        errorName: error?.name || "",
+        errorMessage: error?.message || String(error),
+      });
+    }
+    return changed;
+  }
+
+  function scheduleCodexProjectlessMainWindowEnforcement(source) {
+    clearCodexProjectlessMainWindowTimers();
+    if (!codexProjectlessMainWindowShouldEnforce()) return;
+    const revision = codexProjectlessMainWindowState.revision;
+    window.__codexProjectlessMainWindowTimers = codexProjectlessMainWindowRetryDelaysMs.map((delay) => setTimeout(() => {
+      void enforceCodexProjectlessMainWindow(source, revision);
+    }, delay));
+  }
+
+  function codexProjectlessMainWindowTriggerKind(target) {
+    if (!target?.closest) return "";
+    const explicitProject = target.closest(
+      'button[aria-label^="Start new chat in "], [data-app-action-sidebar-project-row][data-app-action-sidebar-project-id], [role="menuitem"][data-project-id], [role="menuitem"][data-workspace-root]'
+    );
+    if (explicitProject) return "project";
+    const trigger = target.closest('button, a, [role="button"], [role="menuitem"]');
+    if (!trigger) return "";
+    const labels = [
+      trigger.getAttribute?.("aria-label"),
+      trigger.getAttribute?.("title"),
+      trigger.innerText || trigger.textContent,
+    ].map((value) => String(value || "").replace(/\s+/g, " ").trim().toLowerCase()).filter(Boolean);
+    return labels.some((label) => /^(new (task|chat)|quick chat|新建(任务|对话)|快速对话)(?:\s|ctrl\+|cmd\+|⌘|$)/i.test(label))
+      ? "generic"
+      : "";
+  }
+
+  function beginCodexProjectlessGenericNewTask(source) {
+    const now = Date.now();
+    if (codexProjectlessMainWindowState.intent !== "generic"
+        || now - codexProjectlessMainWindowState.lastGenericBeginAt > 400) {
+      setCodexProjectlessMainWindowIntent("generic", source);
+    } else {
+      codexProjectlessMainWindowState.source = String(source || "");
+    }
+    codexProjectlessMainWindowState.lastGenericBeginAt = now;
+    try {
+      sessionStorage.removeItem(upstreamProjectContextKey);
+    } catch {
+    }
+    scheduleCodexProjectlessMainWindowEnforcement(source);
+  }
+
+  function installCodexProjectlessNewTaskButtons() {
+    if (!codexProjectlessMainWindowEnabled()) return;
+    Array.from(document.querySelectorAll("button, a, [role='button'], [role='menuitem']")).forEach((trigger) => {
+      if (trigger.closest?.('[data-app-action-sidebar-project-row][data-app-action-sidebar-project-id]')) return;
+      if (codexProjectlessMainWindowTriggerKind(trigger) !== "generic") return;
+      if (trigger.dataset?.codexProjectlessMainWindow === codexProjectlessMainWindowVersion) return;
+      if (trigger.dataset) trigger.dataset.codexProjectlessMainWindow = codexProjectlessMainWindowVersion;
+      trigger.addEventListener("click", () => beginCodexProjectlessGenericNewTask("generic-new-task-button"), true);
+    });
+  }
+
+  function handleCodexProjectlessMainWindowNavigation(event) {
+    const target = event?.target?.closest ? event.target : event?.target?.parentElement;
+    const kind = codexProjectlessMainWindowTriggerKind(target);
+    if (kind === "project") {
+      setCodexProjectlessMainWindowIntent("project", "explicit-project");
+      return;
+    }
+    if (kind !== "generic") return;
+    beginCodexProjectlessGenericNewTask("generic-new-task");
+  }
+
+  function installCodexProjectlessMainWindowProtection() {
+    if (window.__codexProjectlessMainWindowProtectionVersion === codexProjectlessMainWindowVersion) return;
+    document.removeEventListener("pointerdown", window.__codexProjectlessMainWindowNavigationHandler, true);
+    document.removeEventListener("click", window.__codexProjectlessMainWindowNavigationHandler, true);
+    window.__codexProjectlessMainWindowNavigationHandler = handleCodexProjectlessMainWindowNavigation;
+    document.addEventListener("pointerdown", window.__codexProjectlessMainWindowNavigationHandler, true);
+    document.addEventListener("click", window.__codexProjectlessMainWindowNavigationHandler, true);
+    window.__codexProjectlessMainWindowProtectionVersion = codexProjectlessMainWindowVersion;
+  }
+
+  async function getCodexProjectlessMainWindowSetting() {
+    try {
+      const settingStorage = await codexSettingStorageModule();
+      return await settingStorage.n(codexProjectlessMainWindowSetting);
+    } catch (error) {
+      if (typeof codexStateCall === "function") {
+        const result = await codexStateCall("get-setting", { params: { key: codexProjectlessMainWindowSetting.key } });
+        return result && Object.prototype.hasOwnProperty.call(result, "value")
+          ? result.value
+          : codexProjectlessMainWindowSetting.default;
+      }
+      throw error;
+    }
+  }
+
+  async function loadCodexProjectlessMainWindowSetting(attempt = 0) {
+    try {
+      codexProjectlessMainWindowState.enabled = (await getCodexProjectlessMainWindowSetting()) === true;
+      codexProjectlessMainWindowState.loaded = true;
+      if (!codexProjectlessMainWindowState.enabled) {
+        setCodexProjectlessMainWindowIntent("", "setting-disabled");
+        return;
+      }
+      if (!codexProjectlessMainWindowState.intent) {
+        setCodexProjectlessMainWindowIntent("generic", "startup");
+      }
+      installAppServerModelRequestPatch();
+      scheduleCodexProjectlessMainWindowEnforcement("startup");
+      installCodexProjectlessNewTaskButtons();
+    } catch (error) {
+      if (attempt < 60) {
+        setTimeout(() => void loadCodexProjectlessMainWindowSetting(attempt + 1), 250);
+        return;
+      }
+      sendCodexPlusDiagnostic("projectless_main_window_setting_failed", {
+        errorName: error?.name || "",
+        errorMessage: error?.message || String(error),
+      });
+    }
+  }
+
+  if (window.__CODEX_PLUS_TEST_PROJECTLESS__) {
+    window.__codexPlusProjectlessTest = {
+      triggerKind: codexProjectlessMainWindowTriggerKind,
+      setEnabled: (enabled) => {
+        codexProjectlessMainWindowState.loaded = true;
+        codexProjectlessMainWindowState.enabled = enabled === true;
+      },
+      setIntent: setCodexProjectlessMainWindowIntent,
+      shouldEnforce: codexProjectlessMainWindowShouldEnforce,
+      requestNeedsOverride: codexProjectlessRequestNeedsOverride,
+      applyRequestOverride: applyCodexProjectlessRequestOverride,
+      appServerRequestNeedsOverride: codexProjectlessAppServerRequestNeedsOverride,
+      applyAppServerRequestOverride: applyCodexProjectlessAppServerRequestOverride,
+      patchAppServerClient: patchAppServerModelRequestClient,
+      contextValid: codexProjectlessContextValid,
+      setDraftContext: (context) => {
+        codexProjectlessMainWindowState.contextRevision = codexProjectlessMainWindowState.revision;
+        codexProjectlessMainWindowState.draftContext = context;
+        codexProjectlessMainWindowState.contextPromise = null;
+      },
+      dispatchMessage: dispatchCodexPlusMessage,
+      state: () => ({ ...codexProjectlessMainWindowState }),
+    };
+  }
+
   function objectGlobalState(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? { ...value } : {};
   }
@@ -4494,6 +5262,13 @@
       applyServiceTierOverride: (method, params, threadIdHint = "") => applyCodexServiceTierRequestOverride(method, params, threadIdHint),
       requestOverride: (message) => codexServiceTierRequestOverride(message),
       diagnostics: () => [...(window.__codexPlusServiceTierTestDiagnostics || [])],
+      currentModelName: () => codexServiceTierCurrentModelName(),
+      fastAvailability: (modelName = codexServiceTierCurrentModelName()) => codexServiceTierFastAvailability(modelName),
+      modelButtonText: (button) => codexServiceTierModelButtonText(button),
+      setCurrentModelLabel: (label = "", controlPresent = !!String(label || "").trim()) => {
+        window.__codexPlusServiceTierTestCurrentModelLabel = String(label || "");
+        window.__codexPlusServiceTierTestCurrentModelControlPresent = controlPresent === true;
+      },
       setModelCatalog: (catalog = {}) => {
         codexModelCatalog = {
           status: "ok",
@@ -4589,8 +5364,23 @@
     return codexModelCatalogPromise;
   }
 
-  function modelReasoningEfforts() {
-    return ["minimal", "low", "medium", "high", "xhigh"].map((reasoningEffort) => ({ reasoningEffort, description: `${reasoningEffort} effort` }));
+  function codexPlusModelMetadata(modelName) {
+    const metadata = codexModelCatalog.modelMetadata || codexModelCatalog.model_metadata;
+    const normalizedName = codexServiceTierModelFromValue(modelName);
+    const exact = metadata && typeof metadata === "object" ? metadata[normalizedName] : null;
+    const matchedKey = !exact && metadata && typeof metadata === "object"
+      ? Object.keys(metadata).find((key) => key.toLowerCase() === normalizedName.toLowerCase())
+      : null;
+    const value = exact || (matchedKey ? metadata[matchedKey] : null);
+    return value && typeof value === "object" ? value : null;
+  }
+
+  function modelReasoningEfforts(modelName) {
+    const supported = codexPlusModelMetadata(modelName)?.supportedReasoningEfforts;
+    if (Array.isArray(supported) && supported.length > 0) {
+      return supported.map((entry) => ({ ...entry }));
+    }
+    return ["low", "medium", "high", "xhigh"].map((reasoningEffort) => ({ reasoningEffort, description: `${reasoningEffort} effort` }));
   }
 
   function codexPlusConfiguredModelDescriptor(modelName) {
@@ -4603,18 +5393,19 @@
 
   function codexPlusModelDescriptor(modelName) {
     const configured = codexPlusConfiguredModelDescriptor(modelName);
-    const displayName = configured?.displayName || configured?.display_name || configured?.name || modelName;
+    const metadata = codexPlusModelMetadata(modelName);
+    const displayName = configured?.displayName || configured?.display_name || configured?.name || metadata?.displayName || modelName;
     return {
       model: modelName,
       id: modelName,
       slug: modelName,
       name: displayName,
       displayName,
-      description: configured?.description || codexModelCatalog.provider_name || codexModelCatalog.model_provider || "Custom model",
+      description: configured?.description || metadata?.description || codexModelCatalog.provider_name || codexModelCatalog.model_provider || "Custom model",
       hidden: false,
       isDefault: (codexModelCatalog.default_model || codexModelCatalog.model) === modelName,
-      defaultReasoningEffort: configured?.defaultReasoningEffort || "medium",
-      supportedReasoningEfforts: Array.isArray(configured?.supportedReasoningEfforts) ? configured.supportedReasoningEfforts : modelReasoningEfforts(),
+      defaultReasoningEffort: configured?.defaultReasoningEffort || metadata?.defaultReasoningEffort || "medium",
+      supportedReasoningEfforts: Array.isArray(configured?.supportedReasoningEfforts) ? configured.supportedReasoningEfforts : modelReasoningEfforts(modelName),
     };
   }
 
@@ -4969,16 +5760,85 @@
     return result;
   }
 
+  function codexProjectlessAppServerStartRequest(method, params) {
+    const requestMethod = String(method || "");
+    if (requestMethod === "send-cli-request-for-host"
+        && params?.method === "thread/start"
+        && params.params
+        && typeof params.params === "object") {
+      return {
+        params: params.params,
+        apply: (nextParams) => ({ ...params, params: nextParams }),
+      };
+    }
+    if (requestMethod === "prewarm-thread-start-for-host"
+        && params?.params
+        && typeof params.params === "object") {
+      return {
+        params: params.params,
+        apply: (nextParams) => ({ ...params, params: nextParams }),
+      };
+    }
+    if (requestMethod === "start-conversation"
+        || requestMethod === "start-thread-for-host"
+        || requestMethod === "prewarm-thread-start-for-host"
+        || requestMethod === "thread/start") {
+      return params && typeof params === "object"
+        ? { params, apply: (nextParams) => nextParams }
+        : null;
+    }
+    return null;
+  }
+
+  function codexProjectlessAppServerRequestNeedsOverride(method, params) {
+    if (!codexProjectlessMainWindowShouldEnforce()) return false;
+    const request = codexProjectlessAppServerStartRequest(method, params);
+    if (!request) return false;
+    return request.params.workspaceKind !== "projectless"
+      || typeof request.params.projectlessOutputDirectory !== "string"
+      || !request.params.projectlessOutputDirectory.trim();
+  }
+
+  function applyCodexProjectlessAppServerRequestOverride(method, params, context) {
+    const request = codexProjectlessAppServerStartRequest(method, params);
+    if (!request) return params;
+    return request.apply(patchCodexProjectlessStartParams(request.params, context));
+  }
+
   function patchAppServerModelRequestClient(client) {
     if (!client || typeof client.sendRequest !== "function") return false;
     if (client.__codexPlusModelRequestPatch === codexAppServerModelRequestPatchVersion) return true;
     const originalSendRequest = client.__codexPlusModelOriginalSendRequest || client.sendRequest.bind(client);
     client.__codexPlusModelOriginalSendRequest = originalSendRequest;
     client.sendRequest = async function codexPlusModelPatchedSendRequest(method, params, options) {
-      const result = await originalSendRequest(method, params, options);
+      let nextParams = params;
+      if (codexProjectlessAppServerRequestNeedsOverride(method, params)) {
+        const revision = codexProjectlessMainWindowState.revision;
+        try {
+          const context = await prepareCodexProjectlessDraftContext(codexProjectlessPromptFromValue(params));
+          if (revision === codexProjectlessMainWindowState.revision
+              && codexProjectlessMainWindowShouldEnforce()) {
+            nextParams = applyCodexProjectlessAppServerRequestOverride(method, params, context);
+            sendCodexPlusDiagnostic("projectless_app_server_start_overridden", {
+              method: String(method || ""),
+              workspaceRootCount: context.workspaceRoots.length,
+              hasOutputDirectory: !!context.projectlessOutputDirectory,
+            });
+          }
+        } catch (error) {
+          sendCodexPlusDiagnostic("projectless_app_server_start_override_failed", {
+            method: String(method || ""),
+            errorName: error?.name || "",
+            errorMessage: error?.message || String(error),
+          });
+          showToast("无项目会话准备失败，请重试", null);
+          throw error;
+        }
+      }
+      const result = await originalSendRequest(method, nextParams, options);
       if (!codexPlusModelUnlockEnabled()) return result;
       if (!codexPlusModelNames().length) await loadCodexModelCatalog();
-      return patchAppServerModelResult(appServerModelRequestMethod(String(method || ""), params), result);
+      return patchAppServerModelResult(appServerModelRequestMethod(String(method || ""), nextParams), result);
     };
     client.__codexPlusModelRequestPatch = codexAppServerModelRequestPatchVersion;
     return true;
@@ -5016,29 +5876,50 @@
     if (appServerModelRequestPatchDisabled) return;
     const patch = async () => {
       try {
-        const module = await loadCodexAppModule("app-server-manager-signals-");
-        const candidates = Object.values(module).filter((value) => value && typeof value === "object");
+        const modules = [];
+        for (const assetPrefix of ["use-host-config-", "app-server-manager-signals-"]) {
+          const module = await loadOptionalCodexAppModule(assetPrefix);
+          if (module) modules.push({ assetPrefix, module });
+        }
+        if (modules.length === 0) {
+          window.__codexPlusAppServerModelRequestPatchInstalled = codexAppServerModelRequestPatchVersion;
+          sendCodexPlusDiagnostic("model_app_server_request_patch_skipped", {
+            reason: "app_server_request_assets_missing",
+          });
+          return;
+        }
+        let candidateCount = 0;
         let patchedCount = 0;
-        for (const candidate of candidates) {
-          if (patchAppServerModelRequestClient(candidate)) patchedCount += 1;
-          if (typeof candidate.sendRequest !== "function" && typeof candidate.get === "function") {
-            try {
-              if (patchAppServerModelRequestClient(candidate.get())) patchedCount += 1;
-            } catch {
+        const patchedAssets = [];
+        for (const { assetPrefix, module } of modules) {
+          const candidates = Object.values(module).filter((value) => value && typeof value === "object");
+          candidateCount += candidates.length;
+          let assetPatchedCount = 0;
+          for (const candidate of candidates) {
+            if (patchAppServerModelRequestClient(candidate)) assetPatchedCount += 1;
+            if (typeof candidate.sendRequest !== "function" && typeof candidate.get === "function") {
+              try {
+                if (patchAppServerModelRequestClient(candidate.get())) assetPatchedCount += 1;
+              } catch {
+              }
             }
           }
+          if (assetPatchedCount > 0) patchedAssets.push(assetPrefix);
+          patchedCount += assetPatchedCount;
         }
         if (patchedCount > 0) {
           appServerModelRequestPatchMissCount = 0;
           window.__codexPlusAppServerModelRequestPatchInstalled = codexAppServerModelRequestPatchVersion;
           sendCodexPlusDiagnostic("model_app_server_request_patch_installed", {
-            candidateCount: candidates.length,
+            candidateCount,
             patchedCount,
+            assets: patchedAssets,
           });
         } else {
           noteAppServerModelRequestPatchMiss("model_app_server_request_patch_not_found", {
-            exportCount: Object.keys(module || {}).length,
-            candidateCount: candidates.length,
+            exportCount: modules.reduce((count, entry) => count + Object.keys(entry.module || {}).length, 0),
+            candidateCount,
+            assets: modules.map((entry) => entry.assetPrefix),
           });
         }
       } catch (error) {
@@ -6983,14 +7864,15 @@
     }
   }
 
-  function updateDeleteButtonOffsets() {
-    sessionRows().forEach((row) => {
+  function updateDeleteButtonOffsets(rows = sessionRows()) {
+    rows.forEach((row) => {
+      const rowRect = row.getBoundingClientRect();
       const hasArchiveConfirm = Array.from(row.querySelectorAll("button")).some((button) => {
         const rect = button.getBoundingClientRect();
         const label = button.getAttribute("aria-label") || "";
         const text = (button.textContent || "").trim();
         if (button.classList.contains(buttonClass) || button.classList.contains(exportButtonClass) || label === "归档对话" || label === "置顶对话") return false;
-        return text === "确认" || (text.length > 0 && rect.width > 0 && rect.width <= 36 && rect.x > row.getBoundingClientRect().right - 50);
+        return text === "确认" || (text.length > 0 && rect.width > 0 && rect.width <= 36 && rect.x > rowRect.right - 50);
       });
       row.classList.toggle("codex-archive-confirm-visible", hasArchiveConfirm);
     });
@@ -7126,19 +8008,76 @@
   }
 
   function installDeleteButtonEventDelegation() {
+    if (window.__codexSessionDeleteDocumentDeleteHandlerVersion === "shared-v3") return;
     document.removeEventListener("pointerup", window.__codexSessionDeleteDocumentDeleteHandler, true);
     document.removeEventListener("click", window.__codexSessionDeleteDocumentDeleteHandler, true);
     const handler = (event) => {
       const button = event.target?.closest?.(`.${buttonClass}`);
       const row = button?.closest?.("[data-app-action-sidebar-thread-id]");
       if (!button || !row) return;
+      const now = Date.now();
+      if (event.type === "click" && now - Number(button.__codexDeleteLastPointerAt || 0) < 700) {
+        stopActionButtonEvent(row, button, event);
+        return;
+      }
+      if (event.type === "pointerup") {
+        if (event.button != null && event.button !== 0) return;
+        button.__codexDeleteLastPointerAt = now;
+      }
       const ref = sessionRefFromRow(row);
       if (!ref.session_id) return;
       openDeleteConfirmForRow(row, button, ref, event);
     };
     window.__codexSessionDeleteDocumentDeleteHandler = handler;
+    window.__codexSessionDeleteDocumentDeleteHandlerVersion = "shared-v3";
     document.addEventListener("pointerup", handler, true);
     document.addEventListener("click", handler, true);
+  }
+
+  function installSessionActionEventDelegation() {
+    const previous = window.__codexSessionActionDelegation;
+    if (previous?.version === "shared-v1") return;
+    if (previous) {
+      for (const [eventName, handler] of previous.handlers || []) {
+        document.removeEventListener(eventName, handler, true);
+      }
+      document.removeEventListener("click", previous.clickHandler, true);
+      document.removeEventListener("focusin", previous.focusHandler, true);
+    }
+    document.querySelectorAll(`.${moreMenuClass}`).forEach((menu) => {
+      if (menu.id !== sharedMoreMenuId) menu.remove();
+    });
+
+    const stopHandler = (event) => {
+      const button = event.target?.closest?.(`.${actionButtonClass}`);
+      if (!button) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    const clickHandler = (event) => {
+      const button = event.target?.closest?.(`.${moreButtonClass}`);
+      const row = button?.closest?.("[data-app-action-sidebar-thread-id]");
+      if (!button || !row) return;
+      stopActionButtonEvent(row, button, event);
+      openSharedSessionMoreMenu(row, button);
+    };
+    const focusHandler = (event) => {
+      const button = event.target?.closest?.(`.${actionButtonClass}`);
+      if (button) button.title = button.dataset.codexActionLabel || button.getAttribute("aria-label") || "";
+    };
+    const handlers = ["pointerdown", "mousedown", "mouseup", "touchstart", "pointerup"]
+      .map((eventName) => {
+        document.addEventListener(eventName, stopHandler, true);
+        return [eventName, stopHandler];
+      });
+    document.addEventListener("click", clickHandler, true);
+    document.addEventListener("focusin", focusHandler, true);
+    window.__codexSessionActionDelegation = {
+      version: "shared-v1",
+      handlers,
+      clickHandler,
+      focusHandler,
+    };
   }
 
   function actionGroupFromRow(row) {
@@ -7243,14 +8182,87 @@
     document.querySelectorAll(`.${actionTooltipClass}`).forEach((node) => node.remove());
   }
 
+  function closeSessionMoreMenu(menu, clearContents = false) {
+    if (!(menu instanceof HTMLElement)) return;
+    menu.hidden = true;
+    menu.__codexSessionMoreRow?.classList?.remove("codex-session-more-open");
+    menu.__codexSessionMoreButton?.setAttribute?.("aria-expanded", "false");
+    menu.closest?.("[data-codex-delete-row]")?.classList.remove("codex-session-more-open");
+    if (clearContents) menu.replaceChildren();
+    menu.__codexSessionMoreRow = null;
+    menu.__codexSessionMoreButton = null;
+  }
+
   function closeSessionMoreMenus(exceptMenu = null) {
     document.querySelectorAll(`.${moreMenuClass}`).forEach((menu) => {
-      if (menu !== exceptMenu) {
-        menu.hidden = true;
-        menu.closest?.("[data-codex-delete-row]")?.classList.remove("codex-session-more-open");
-        menu.__codexSessionMoreRow?.classList?.remove("codex-session-more-open");
-      }
+      if (menu !== exceptMenu) closeSessionMoreMenu(menu);
     });
+  }
+
+  function ensureSharedSessionMoreMenu() {
+    let menu = document.getElementById(sharedMoreMenuId);
+    if (menu instanceof HTMLElement) return menu;
+    menu = document.createElement("div");
+    menu.id = sharedMoreMenuId;
+    menu.className = moreMenuClass;
+    menu.setAttribute("role", "menu");
+    menu.hidden = true;
+    const closeIfOutside = () => {
+      window.setTimeout(() => {
+        if (menu.hidden || menu.matches(":hover") || menu.contains(document.activeElement)) return;
+        closeSessionMoreMenu(menu);
+      }, 80);
+    };
+    menu.addEventListener("pointerleave", closeIfOutside, true);
+    menu.addEventListener("focusout", closeIfOutside, true);
+    document.body.appendChild(menu);
+    return menu;
+  }
+
+  function openSharedSessionMoreMenu(row, button) {
+    const menu = ensureSharedSessionMoreMenu();
+    const sameOpenRow = !menu.hidden && menu.__codexSessionMoreRow === row;
+    const previousRow = menu.__codexSessionMoreRow;
+    const previousButton = menu.__codexSessionMoreButton;
+    closeSessionMoreMenus(menu);
+    if (sameOpenRow) {
+      closeSessionMoreMenu(menu);
+      return;
+    }
+    if (previousRow && previousRow !== row) previousRow.classList.remove("codex-session-more-open");
+    if (previousButton && previousButton !== button) previousButton.setAttribute("aria-expanded", "false");
+    const ref = sessionRefFromRow(row);
+    if (!ref.session_id) {
+      closeSessionMoreMenu(menu, true);
+      return;
+    }
+    const settings = codexPlusSettings();
+    menu.replaceChildren();
+    if (settings.markdownExport) {
+      menu.appendChild(createSessionMoreMenuItem("导出", "⇩", (event) => {
+        stopActionButtonEvent(row, button, event);
+        closeSessionMoreMenu(menu);
+        exportMarkdown(ref);
+      }));
+    }
+    if (settings.projectMove) {
+      menu.appendChild(createSessionMoreMenuItem("移动", "↗", (event) => {
+        stopActionButtonEvent(row, button, event);
+        closeSessionMoreMenu(menu);
+        openProjectMoveMenuForRow(row, button, ref, event);
+      }));
+    }
+    if (!menu.childElementCount) {
+      closeSessionMoreMenu(menu);
+      return;
+    }
+    menu.__codexSessionMoreRow = row;
+    menu.__codexSessionMoreButton = button;
+    menu.hidden = false;
+    row.classList.add("codex-session-more-open");
+    button.setAttribute("aria-expanded", "true");
+    positionSessionMoreMenu(button, menu);
+    updateSessionMoreMenuDirection(button, menu);
   }
 
   function toggleSessionMoreMenu(row, button, menu) {
@@ -7338,7 +8350,7 @@
   function configureActionButton(button, label, icon) {
     button.setAttribute("aria-label", label);
     button.dataset.codexActionLabel = label;
-    button.removeAttribute("title");
+    button.title = label;
     button.textContent = icon;
   }
 
@@ -7357,7 +8369,7 @@
   function configureSvgActionButton(button, label, svg) {
     button.setAttribute("aria-label", label);
     button.dataset.codexActionLabel = label;
-    button.removeAttribute("title");
+    button.title = label;
     button.innerHTML = svg;
   }
 
@@ -7403,39 +8415,7 @@
       moreButton.setAttribute("aria-haspopup", "menu");
       moreButton.setAttribute("aria-expanded", "false");
       configureActionButton(moreButton, "更多操作", "…");
-      const moreMenu = document.createElement("div");
-      moreMenu.className = moreMenuClass;
-      moreMenu.setAttribute("role", "menu");
-      moreMenu.hidden = true;
-      if (settings.markdownExport) {
-        moreMenu.appendChild(createSessionMoreMenuItem("导出", "⇩", (event) => {
-          stopActionButtonEvent(row, moreButton, event);
-          closeSessionMoreMenus();
-          exportMarkdown(ref);
-        }));
-      }
-      if (settings.projectMove) {
-        moreMenu.appendChild(createSessionMoreMenuItem("移动", "↗", (event) => {
-          stopActionButtonEvent(row, moreButton, event);
-          closeSessionMoreMenus();
-          openProjectMoveMenuForRow(row, moreButton, ref, event);
-        }));
-      }
-      const openMoreMenu = (event) => {
-        stopActionButtonEvent(row, moreButton, event);
-        hideActionButtonTooltip();
-        toggleSessionMoreMenu(row, moreButton, moreMenu);
-        if (!moreMenu.hidden) {
-          positionSessionMoreMenu(moreButton, moreMenu);
-          updateSessionMoreMenuDirection(moreButton, moreMenu);
-        }
-      };
-      installMoreButtonEvents(row, moreButton, openMoreMenu);
       group.appendChild(moreButton);
-      moreMenu.__codexSessionMoreRow = row;
-      moreMenu.__codexSessionMoreGroup = group;
-      document.body.appendChild(moreMenu);
-      installSessionMoreMenuAutoClose(row, moreMenu);
     }
     if (settings.sessionDelete) {
       const deleteButton = document.createElement("button");
@@ -7443,10 +8423,7 @@
       deleteButton.className = `${actionButtonClass} ${buttonClass}`;
       deleteButton.dataset.codexDeleteVersion = codexDeleteVersion;
       configureSvgActionButton(deleteButton, "删除", trashIconSvg());
-      const openDeleteConfirm = (event) => openDeleteConfirmForRow(row, deleteButton, ref, event);
-      installActionButtonEvents(row, deleteButton, openDeleteConfirm);
       group.appendChild(deleteButton);
-      setTimeout(() => refreshActionButton(deleteButton, row, openDeleteConfirm), 0);
     }
     row.appendChild(group);
     syncActionGroupLayout(row, group);
@@ -7615,7 +8592,6 @@
     settleFramesLeft: 0,
     mo: null,
     ro: null,
-    pollId: 0,
     moObserved: false,
     observed: new WeakSet(),
     elements: new Set(),
@@ -7653,6 +8629,126 @@
   function codexServiceTierBadgeText(element) {
     return String(element?.textContent || "").replace(/\s+/g, " ").trim();
   }
+
+  function codexServiceTierModelButtonText(element) {
+    if (!element) return "";
+    const clone = element.cloneNode?.(true);
+    if (!clone) return codexServiceTierBadgeText(element);
+    clone.querySelectorAll?.('[aria-hidden="true"], [hidden]').forEach((node) => node.remove());
+    const labelRoot = clone.querySelector?.('[data-tooltip-overflow-target="true"]') || clone;
+    const leafText = Array.from(labelRoot.querySelectorAll?.("*") || [])
+      .filter((node) => node.children?.length === 0)
+      .map((node) => String(node.textContent || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    return (leafText.length ? leafText.join(" ") : codexServiceTierBadgeText(labelRoot))
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function codexServiceTierModelButtonCandidates(root = document) {
+    const selectors = [
+      '[data-codex-intelligence-trigger="true"]',
+      'button[data-composer-navigation-target="reasoning"]',
+      '[role="button"][data-composer-navigation-target="reasoning"]',
+    ].join(", ");
+    return Array.from(root?.querySelectorAll?.(selectors) || [])
+      .filter(codexServiceTierBadgeVisibleElement)
+      .filter((button) => !button.closest?.(`[data-codex-service-tier-badge="true"], #${codexPlusMenuId}, [data-local-conversation-item-target-ids]`))
+      .sort((left, right) => {
+        const leftRect = left.getBoundingClientRect();
+        const rightRect = right.getBoundingClientRect();
+        return (rightRect.bottom - leftRect.bottom) || (rightRect.left - leftRect.left);
+      });
+  }
+
+  function codexServiceTierModelButtonSignature(button) {
+    if (!button) return "";
+    const reserved = Array.from(button.querySelectorAll?.("[data-reserved]") || [])
+      .map((node) => node.getAttribute("data-reserved") || "")
+      .join(",");
+    return [
+      button.getAttribute?.("data-model") || "",
+      button.getAttribute?.("data-model-id") || "",
+      button.getAttribute?.("data-selected-reasoning-effort") || "",
+      button.getAttribute?.("aria-label") || "",
+      button.getAttribute?.("title") || "",
+      reserved,
+      codexServiceTierModelButtonText(button),
+    ].join("\u241f");
+  }
+
+  try {
+    window.__codexServiceTierModelObserverCleanup?.();
+  } catch {
+  }
+  const codexServiceTierModelObserverRuntime = {
+    observer: null,
+    button: null,
+    signature: "",
+    rafId: 0,
+    reloadSetting: false,
+  };
+
+  function cleanupCodexServiceTierModelObserver() {
+    codexServiceTierModelObserverRuntime.observer?.disconnect();
+    codexServiceTierModelObserverRuntime.observer = null;
+    codexServiceTierModelObserverRuntime.button = null;
+    codexServiceTierModelObserverRuntime.signature = "";
+    codexServiceTierModelObserverRuntime.reloadSetting = false;
+    if (codexServiceTierModelObserverRuntime.rafId) {
+      cancelAnimationFrame(codexServiceTierModelObserverRuntime.rafId);
+      codexServiceTierModelObserverRuntime.rafId = 0;
+    }
+  }
+
+  function scheduleCodexServiceTierModelRefresh(reloadSetting = false) {
+    codexServiceTierModelObserverRuntime.reloadSetting ||= reloadSetting;
+    if (codexServiceTierModelObserverRuntime.rafId) return;
+    codexServiceTierModelObserverRuntime.rafId = requestAnimationFrame(() => {
+      codexServiceTierModelObserverRuntime.rafId = 0;
+      const shouldReloadSetting = codexServiceTierModelObserverRuntime.reloadSetting;
+      codexServiceTierModelObserverRuntime.reloadSetting = false;
+      refreshCodexServiceTierControls();
+      installCodexServiceTierModelObserver();
+      if (shouldReloadSetting) void loadCodexServiceTierState({ silent: true });
+    });
+  }
+
+  function installCodexServiceTierModelObserver() {
+    if (!codexPlusSettings().serviceTierControls) {
+      cleanupCodexServiceTierModelObserver();
+      return;
+    }
+    const button = codexServiceTierModelButtonCandidates()[0] || null;
+    if (button === codexServiceTierModelObserverRuntime.button) {
+      const signature = codexServiceTierModelButtonSignature(button);
+      if (signature !== codexServiceTierModelObserverRuntime.signature) {
+        codexServiceTierModelObserverRuntime.signature = signature;
+        scheduleCodexServiceTierModelRefresh(true);
+      }
+      return;
+    }
+    codexServiceTierModelObserverRuntime.observer?.disconnect();
+    codexServiceTierModelObserverRuntime.observer = null;
+    codexServiceTierModelObserverRuntime.button = button;
+    codexServiceTierModelObserverRuntime.signature = codexServiceTierModelButtonSignature(button);
+    if (!button) return;
+    codexServiceTierModelObserverRuntime.observer = new MutationObserver(() => {
+      const signature = codexServiceTierModelButtonSignature(button);
+      if (signature === codexServiceTierModelObserverRuntime.signature) return;
+      codexServiceTierModelObserverRuntime.signature = signature;
+      scheduleCodexServiceTierModelRefresh(true);
+    });
+    codexServiceTierModelObserverRuntime.observer.observe(button, {
+      attributes: true,
+      attributeFilter: ["data-model", "data-model-id", "data-selected-reasoning-effort", "data-reserved", "aria-label", "title"],
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+  }
+
+  window.__codexServiceTierModelObserverCleanup = cleanupCodexServiceTierModelObserver;
 
   function codexServiceTierKnownProviderNames() {
     return uniqueValues([
@@ -7892,25 +8988,51 @@
   }
 
   function conversationViewResetOwnOffset(el) {
-    if (!el) return;
+    if (!el) return false;
+    let changed = false;
     const originalTransform = el.dataset.codexPlusConversationViewOriginalTransform || "";
     const originalLeft = el.dataset.codexPlusConversationViewOriginalLeft || "";
-    if (el.style.left !== originalLeft) el.style.left = originalLeft;
-    if (el.style.transform !== originalTransform) el.style.transform = originalTransform;
+    if (el.style.left !== originalLeft) {
+      el.style.left = originalLeft;
+      changed = true;
+    }
+    if (el.style.transform !== originalTransform) {
+      el.style.transform = originalTransform;
+      changed = true;
+    }
     const transform = String(el.style.transform || "").trim();
     if (/^(translateX\([^)]*\)\s*)+$/i.test(transform)) {
       el.style.transform = "";
+      changed = true;
     }
+    return changed;
   }
 
   function conversationViewApplyNativeWidth(el) {
     conversationViewRememberOriginals(el);
     const maxWidth = `${conversationViewWidth()}px`;
-    if (el.style.boxSizing !== "border-box") el.style.boxSizing = "border-box";
-    if (el.style.width !== "100%") el.style.width = "100%";
-    if (el.style.maxWidth !== maxWidth) el.style.maxWidth = maxWidth;
-    if (el.style.marginLeft !== "auto") el.style.marginLeft = "auto";
-    if (el.style.marginRight !== "auto") el.style.marginRight = "auto";
+    let changed = false;
+    if (el.style.boxSizing !== "border-box") {
+      el.style.boxSizing = "border-box";
+      changed = true;
+    }
+    if (el.style.width !== "100%") {
+      el.style.width = "100%";
+      changed = true;
+    }
+    if (el.style.maxWidth !== maxWidth) {
+      el.style.maxWidth = maxWidth;
+      changed = true;
+    }
+    if (el.style.marginLeft !== "auto") {
+      el.style.marginLeft = "auto";
+      changed = true;
+    }
+    if (el.style.marginRight !== "auto") {
+      el.style.marginRight = "auto";
+      changed = true;
+    }
+    return changed;
   }
 
   function conversationViewSessionRectFor(el) {
@@ -7922,21 +9044,23 @@
     return rect.left + rect.width / 2;
   }
 
-  function conversationViewHasRoomForHtmlCenter(nativeRect, bounds) {
+  function conversationViewHasRoomForHtmlCenter(nativeRect, bounds, htmlCenter) {
     if (!nativeRect || !bounds) return false;
-    const targetLeft = conversationViewHtmlCenter() - nativeRect.width / 2;
+    const targetLeft = htmlCenter - nativeRect.width / 2;
     const targetRight = targetLeft + nativeRect.width;
     return targetLeft >= bounds.left - 0.5 && targetRight <= bounds.right + 0.5;
   }
 
-  function conversationViewAlignElement(el) {
+  function conversationViewAlignElement(el, htmlCenter) {
     if (!el?.isConnected) return;
-    conversationViewApplyNativeWidth(el);
-    conversationViewResetOwnOffset(el);
+    const widthChanged = conversationViewApplyNativeWidth(el);
+    const offsetChanged = conversationViewResetOwnOffset(el);
+    const styleChanged = widthChanged || offsetChanged;
+    if (styleChanged) return;
     const nativeRect = el.getBoundingClientRect();
     const bounds = conversationViewSessionRectFor(el);
-    if (!conversationViewHasRoomForHtmlCenter(nativeRect, bounds)) return;
-    const targetLeft = conversationViewHtmlCenter() - nativeRect.width / 2;
+    if (!conversationViewHasRoomForHtmlCenter(nativeRect, bounds, htmlCenter)) return;
+    const targetLeft = htmlCenter - nativeRect.width / 2;
     const delta = targetLeft - nativeRect.left;
     if (Math.abs(delta) > 0.5) {
       const nextLeft = `${delta.toFixed(2)}px`;
@@ -7968,11 +9092,12 @@
   function conversationViewAlignNow() {
     if (!codexPlusSettings().conversationView) return;
     conversationViewResolveTargets();
-    conversationViewAlignElement(conversationViewState.contentEl);
-    conversationViewAlignElement(conversationViewState.composerEl);
+    const htmlCenter = conversationViewHtmlCenter();
+    conversationViewAlignElement(conversationViewState.contentEl, htmlCenter);
+    conversationViewAlignElement(conversationViewState.composerEl, htmlCenter);
   }
 
-  function scheduleConversationViewAlign(frames = 16) {
+  function scheduleConversationViewAlign(frames = 3) {
     conversationViewState.settleFramesLeft = Math.max(conversationViewState.settleFramesLeft, frames);
     if (conversationViewState.rafId) return;
     const tick = () => {
@@ -7988,9 +9113,7 @@
 
   function cleanupConversationView() {
     if (conversationViewState.rafId) cancelAnimationFrame(conversationViewState.rafId);
-    if (conversationViewState.pollId) clearInterval(conversationViewState.pollId);
     conversationViewState.rafId = 0;
-    conversationViewState.pollId = 0;
     conversationViewState.mo?.disconnect();
     conversationViewState.ro?.disconnect();
     conversationViewState.mo = null;
@@ -8006,19 +9129,16 @@
   window.__codexPlusConversationViewCleanup = cleanupConversationView;
 
   function ensureConversationViewRuntime() {
-    if (conversationViewState.ro && conversationViewState.mo && conversationViewState.pollId) return;
-    conversationViewState.ro = conversationViewState.ro || new ResizeObserver(() => scheduleConversationViewAlign());
-    conversationViewState.mo = conversationViewState.mo || new MutationObserver(() => scheduleConversationViewAlign());
+    if (conversationViewState.ro && conversationViewState.mo) return;
+    conversationViewState.ro = conversationViewState.ro || new ResizeObserver(() => scheduleConversationViewAlign(2));
+    conversationViewState.mo = conversationViewState.mo || new MutationObserver(() => scheduleConversationViewAlign(3));
     if (document.body && !conversationViewState.moObserved) {
       conversationViewState.mo.observe(document.body, {
         childList: true,
         subtree: true,
-        attributes: true,
-        attributeFilter: ["class", "hidden", "data-state", "aria-hidden"],
       });
       conversationViewState.moObserved = true;
     }
-    conversationViewState.pollId = conversationViewState.pollId || window.setInterval(() => scheduleConversationViewAlign(2), 350);
   }
 
   function refreshConversationView() {
@@ -8033,10 +9153,13 @@
   function scanLightweight() {
     installStyle();
     installCodexServiceTierDispatcherPatch();
+    installCodexProjectlessNewTaskButtons();
     installCodexPlusMenu();
     localizeCodexMenus();
+    installCodexApiLogoutMenuItem();
     scheduleBackendHeartbeat();
     installDeleteButtonEventDelegation();
+    installSessionActionEventDelegation();
     updateThreadScrollHandlers();
     installThreadScrollProgrammaticScrollGuard();
     installThreadScrollNavigationCapture();
@@ -8046,7 +9169,7 @@
     refreshCodexServiceTierControls();
   }
 
-  function scanDeferred() {
+  function scanDeferred(forceSessionRows = false) {
     if (pluginPatchDisabledInRelayMode()) {
       clearPluginPatchArtifacts();
     } else {
@@ -8067,13 +9190,15 @@
         }
       }
     }
-    refreshThreadIdBadges();
-    sessionRows().forEach(tryAttachButton);
-    updateDeleteButtonOffsets();
+    const changedSessionRows = sessionRowsFromMutations(window.__codexSessionDeleteLastMutations, forceSessionRows);
+    refreshThreadIdBadges(changedSessionRows);
+    changedSessionRows.forEach(tryAttachButton);
+    updateDeleteButtonOffsets(changedSessionRows);
     scheduleProjectMoveProjection();
     scheduleChatsSortCorrection();
     archivedPageRows().forEach(attachArchivedPageDeleteButton);
     refreshConversationView();
+    installCodexServiceTierModelObserver();
     installCodexServiceTierBadge();
     scheduleThreadScrollSync();
     refreshCodexModelWhitelistFromScan(window.__codexSessionDeleteLastMutations);
@@ -8089,13 +9214,13 @@
     }
   }
 
-  function scan() {
+  function scan(forceSessionRows = false) {
     runScanStep(scanLightweight);
-    requestAnimationFrame(() => runScanStep(scanDeferred));
+    requestAnimationFrame(() => runScanStep(() => scanDeferred(forceSessionRows)));
   }
 
   function isExtensionUiNode(node) {
-    return !!node?.closest?.(`.codex-delete-toast, .codex-delete-confirm-overlay, .codex-plus-modal-overlay, .${projectMoveOverlayClass}, .${codexServiceTierBadgeClass}, #codex-plus-menu`);
+    return !!node?.closest?.(`.codex-delete-toast, .codex-delete-confirm-overlay, .codex-plus-modal-overlay, .${projectMoveOverlayClass}, .${codexServiceTierBadgeClass}, #codex-plus-menu, [data-codex-api-logout]`);
   }
 
   function scanRelevantSelector() {
@@ -8111,6 +9236,8 @@
       '[class*="user-message"]',
       '[class*="UserMessage"]',
       ".composer-footer",
+      '[data-codex-intelligence-trigger="true"]',
+      '[data-composer-navigation-target="reasoning"]',
       selectors.appHeader,
       selectors.archiveNav,
       codexMenuLocalizationScopeSelector(),
@@ -8156,13 +9283,16 @@
     window.__codexSessionDeleteScanPending = false;
     clearTimeout(window.__codexSessionDeleteScanTimer);
     window.__codexSessionDeleteScanTimer = null;
+    window.__codexSessionDeleteLastMutations = window.__codexSessionDeletePendingMutations || [];
+    window.__codexSessionDeletePendingMutations = [];
     scan();
   }
 
   function scheduleScan(mutations) {
-    window.__codexSessionDeleteLastMutations = mutations;
     schedulePluginAutoExpand();
     if (!shouldScheduleScan(mutations)) return;
+    window.__codexSessionDeletePendingMutations = window.__codexSessionDeletePendingMutations || [];
+    window.__codexSessionDeletePendingMutations.push(...mutations);
     if (window.__codexSessionDeleteScanPending) return;
     window.__codexSessionDeleteScanPending = true;
     window.__codexSessionDeleteScanTimer = setTimeout(runScheduledScan, 200);
@@ -8170,9 +9300,11 @@
 
   void loadBackendSettingsForStartup();
   void loadCodexServiceTierState();
+  installCodexProjectlessMainWindowProtection();
+  if (!window.__CODEX_PLUS_TEST_PROJECTLESS__) void loadCodexProjectlessMainWindowSetting();
   installUpstreamBranchDropdownAdapter();
   installUpstreamWorktreeNativeAdapter();
-  scan();
+  scan(true);
   window.__codexProjectMoveApplyProjection = applyProjectMoveProjection;
   window.__codexProjectMoveReadProjection = readProjectMoveProjection;
   window.__codexProjectMoveTargets = projectMoveTargets;
