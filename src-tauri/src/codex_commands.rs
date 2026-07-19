@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -10,6 +11,7 @@ use codex_plus_core::settings::{
     BackendSettings, HotSwitchModelMapping, RelayProfile, SettingsStore,
 };
 use codex_plus_core::status::{LaunchStatus, StatusStore};
+use codex_plus_core::theme_market::{self, ThemeMarketLoad, ThemeMarketManifest};
 use codex_plus_core::theme_studio::{ThemeStudioManager, ThemeStudioPayload, ThemeStudioSettings};
 use codex_plus_core::user_scripts::UserScriptManager;
 use serde::{Deserialize, Serialize};
@@ -324,6 +326,8 @@ pub struct LogsPayload {
     pub path: String,
     pub text: String,
     pub lines: usize,
+    pub truncated: bool,
+    pub file_size: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -353,6 +357,21 @@ pub struct ScriptMarketPayload {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThemeStudioCommandPayload {
+    pub settings: ThemeStudioSettings,
+    pub settings_path: String,
+    pub package_format: String,
+    pub runtime_connected: bool,
+    pub runtime_status: String,
+    pub debug_port: u16,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeMarketCommandPayload {
+    pub market: ThemeMarketManifest,
+    pub cached: bool,
+    pub warning: String,
+    pub repository_url: String,
     pub settings: ThemeStudioSettings,
     pub settings_path: String,
     pub package_format: String,
@@ -2265,6 +2284,81 @@ pub async fn load_codex_theme_studio() -> CommandResult<ThemeStudioCommandPayloa
 }
 
 #[tauri::command]
+pub async fn refresh_theme_market() -> CommandResult<ThemeMarketCommandPayload> {
+    let manager = ThemeStudioManager::default();
+    let runtime = inspect_theme_runtime().await;
+    match theme_market::load_market(&manager).await {
+        Ok(load) => {
+            let warning_message = load.warning.clone();
+            let payload = theme_market_command_payload(&manager, load, &runtime);
+            if let Some(message) = warning_message {
+                warning(&message, payload)
+            } else {
+                ok("主题市场已刷新。", payload)
+            }
+        }
+        Err(error) => failed(
+            &format!("主题市场加载失败：{error}"),
+            failed_theme_market_payload(&manager, &runtime),
+        ),
+    }
+}
+
+#[tauri::command]
+pub async fn install_theme_market_theme(id: String) -> CommandResult<ThemeMarketCommandPayload> {
+    let manager = ThemeStudioManager::default();
+    let trimmed = id.trim();
+    if trimmed.is_empty() {
+        let runtime = inspect_theme_runtime().await;
+        return failed(
+            "主题 id 不能为空。",
+            failed_theme_market_payload(&manager, &runtime),
+        );
+    }
+
+    let mut load = match theme_market::load_market(&manager).await {
+        Ok(load) => load,
+        Err(error) => {
+            let runtime = inspect_theme_runtime().await;
+            return failed(
+                &format!("主题市场加载失败：{error}"),
+                failed_theme_market_payload(&manager, &runtime),
+            );
+        }
+    };
+    let Some(theme) = load
+        .manifest
+        .themes
+        .iter()
+        .find(|theme| theme.id == trimmed)
+        .cloned()
+    else {
+        let runtime = inspect_theme_runtime().await;
+        return failed(
+            "市场清单中未找到该主题。",
+            theme_market_command_payload(&manager, load, &runtime),
+        );
+    };
+
+    if let Err(error) = theme_market::install_market_theme(&manager, &theme).await {
+        let runtime = inspect_theme_runtime().await;
+        return failed(
+            &format!("安装主题失败：{error}"),
+            theme_market_command_payload(&manager, load, &runtime),
+        );
+    }
+
+    load.manifest = theme_market::enrich_market_manifest(&manager, load.manifest);
+    let runtime = apply_theme_runtime(&manager).await;
+    let payload = theme_market_command_payload(&manager, load, &runtime);
+    if runtime.connected {
+        ok("主题已安装并选中，当前主题运行时已重新加载。", payload)
+    } else {
+        warning("主题已安装并选中；当前未连接 Codex。", payload)
+    }
+}
+
+#[tauri::command]
 pub async fn save_codex_theme_studio(
     request: SaveThemeStudioRequest,
 ) -> CommandResult<ThemeStudioCommandPayload> {
@@ -2752,12 +2846,14 @@ pub fn disable_watcher() -> CommandResult<WatcherPayload> {
 pub fn read_latest_logs(request: LogRequest) -> CommandResult<LogsPayload> {
     let path = codex_plus_core::paths::default_diagnostic_log_path();
     match read_tail(&path, request.lines) {
-        Ok(text) => ok(
+        Ok(tail) => ok(
             "日志已读取。",
             LogsPayload {
                 path: path.to_string_lossy().to_string(),
-                text,
+                text: tail.text,
                 lines: request.lines,
+                truncated: tail.truncated,
+                file_size: tail.file_size,
             },
         ),
         Err(error) => failed(
@@ -2766,6 +2862,35 @@ pub fn read_latest_logs(request: LogRequest) -> CommandResult<LogsPayload> {
                 path: path.to_string_lossy().to_string(),
                 text: String::new(),
                 lines: request.lines,
+                truncated: false,
+                file_size: 0,
+            },
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn clear_logs() -> CommandResult<LogsPayload> {
+    let path = codex_plus_core::paths::default_diagnostic_log_path();
+    match codex_plus_core::diagnostic_log::clear_diagnostic_log() {
+        Ok(()) => ok(
+            "日志已清理。",
+            LogsPayload {
+                path: path.to_string_lossy().to_string(),
+                text: String::new(),
+                lines: 0,
+                truncated: false,
+                file_size: 0,
+            },
+        ),
+        Err(error) => failed(
+            &format!("清理日志失败：{error}"),
+            LogsPayload {
+                path: path.to_string_lossy().to_string(),
+                text: String::new(),
+                lines: 0,
+                truncated: false,
+                file_size: 0,
             },
         ),
     }
@@ -4569,6 +4694,7 @@ async fn apply_theme_runtime(manager: &ThemeStudioManager) -> ThemeRuntimeState 
             };
         }
     };
+    sync_codex_title_bar_text_color(manager);
     let targets = match codex_plus_core::cdp::list_targets(debug_port).await {
         Ok(targets) => targets,
         Err(error) => {
@@ -4610,6 +4736,32 @@ async fn apply_theme_runtime(manager: &ThemeStudioManager) -> ThemeRuntimeState 
     inspect_theme_runtime().await
 }
 
+#[cfg(windows)]
+fn sync_codex_title_bar_text_color(manager: &ThemeStudioManager) {
+    let color = manager.title_bar_text_color();
+    for process_id in codex_plus_core::watcher::find_codex_processes() {
+        let _ = codex_plus_core::windows_apply_codex_title_bar_text_color_to_process_window(
+            process_id, color,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn sync_codex_title_bar_text_color(_manager: &ThemeStudioManager) {}
+
+/// Re-apply the active theme's native title-bar glyph color to every currently
+/// open Codex window. Unlike `apply_theme_runtime`, this does not require a CDP
+/// connection or a Compass-initiated launch, so windows that the user restarts
+/// manually still get their minimize/maximize/close buttons corrected.
+#[cfg(windows)]
+pub fn sync_codex_title_bar_text_color_now() {
+    let manager = ThemeStudioManager::default();
+    sync_codex_title_bar_text_color(&manager);
+}
+
+#[cfg(not(windows))]
+pub fn sync_codex_title_bar_text_color_now() {}
+
 fn theme_studio_command_payload(
     payload: ThemeStudioPayload,
     runtime: &ThemeRuntimeState,
@@ -4622,6 +4774,45 @@ fn theme_studio_command_payload(
         runtime_status: runtime.status.clone(),
         debug_port: runtime.debug_port,
     }
+}
+
+fn theme_market_command_payload(
+    manager: &ThemeStudioManager,
+    load: ThemeMarketLoad,
+    runtime: &ThemeRuntimeState,
+) -> ThemeMarketCommandPayload {
+    let payload = manager.payload();
+    ThemeMarketCommandPayload {
+        market: load.manifest,
+        cached: load.cached,
+        warning: load.warning.unwrap_or_default(),
+        repository_url: theme_market::DEFAULT_MARKET_REPOSITORY_URL.to_string(),
+        settings: payload.settings,
+        settings_path: payload.settings_path,
+        package_format: payload.package_format,
+        runtime_connected: runtime.connected,
+        runtime_status: runtime.status.clone(),
+        debug_port: runtime.debug_port,
+    }
+}
+
+fn failed_theme_market_payload(
+    manager: &ThemeStudioManager,
+    runtime: &ThemeRuntimeState,
+) -> ThemeMarketCommandPayload {
+    theme_market_command_payload(
+        manager,
+        ThemeMarketLoad {
+            manifest: ThemeMarketManifest {
+                schema_version: 1,
+                updated_at: String::new(),
+                themes: Vec::new(),
+            },
+            cached: false,
+            warning: None,
+        },
+        runtime,
+    )
 }
 
 fn default_user_script_manager() -> UserScriptManager {
@@ -4741,11 +4932,46 @@ fn watcher_payload() -> WatcherPayload {
     }
 }
 
-fn read_tail(path: &Path, max_lines: usize) -> std::io::Result<String> {
-    let contents = fs::read_to_string(path)?;
+const MAX_LOG_TAIL_READ_BYTES: u64 = 2 * 1024 * 1024;
+
+#[derive(Debug, Clone)]
+struct TailRead {
+    text: String,
+    truncated: bool,
+    file_size: u64,
+}
+
+fn read_tail(path: &Path, max_lines: usize) -> std::io::Result<TailRead> {
+    let mut file = fs::File::open(path)?;
+    let file_size = file.metadata()?.len();
+    if max_lines == 0 || file_size == 0 {
+        return Ok(TailRead {
+            text: String::new(),
+            truncated: false,
+            file_size,
+        });
+    }
+
+    let read_len = MAX_LOG_TAIL_READ_BYTES.min(file_size);
+    let start = file_size - read_len;
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::with_capacity(read_len as usize);
+    file.read_to_end(&mut bytes)?;
+    let truncated = start > 0;
+    if truncated {
+        if let Some(pos) = bytes.iter().position(|byte| *byte == b'\n') {
+            bytes.drain(..=pos);
+        }
+    }
+
+    let contents = String::from_utf8_lossy(&bytes);
     let mut lines = contents.lines().rev().take(max_lines).collect::<Vec<_>>();
     lines.reverse();
-    Ok(lines.join("\n"))
+    Ok(TailRead {
+        text: lines.join("\n"),
+        truncated,
+        file_size,
+    })
 }
 
 fn path_state(path: Option<PathBuf>) -> PathState {
@@ -5405,7 +5631,7 @@ mod tests {
         let profile = RelayProfile {
             relay_mode: codex_plus_core::settings::RelayMode::PureApi,
             protocol: codex_plus_core::settings::RelayProtocol::Responses,
-            config_contents: "model_provider = \"ai\"\nmodel = \"gpt-image-2\"\n\n[model_providers.ai]\nname = \"ai\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"https://ahg.codes\"\n"
+            config_contents: "model_provider = \"ai\"\nmodel = \"gpt-image-2\"\n\n[model_providers.ai]\nname = \"ai\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"https://private.example\"\n"
                 .to_string(),
             auth_contents: "{}\n".to_string(),
             ..RelayProfile::default()
@@ -5625,8 +5851,8 @@ last_updated = "2026-05-25T11:52:46Z"
     #[test]
     fn normalize_settings_before_save_removes_model_catalog_from_common_config() {
         let settings = BackendSettings {
-            relay_common_config_contents: r#"model_catalog_json = "C:\\Users\\Administrator\\.codex\\model-catalogs\\relay-a.json"
-model_catalog_json = 'C:\Users\Administrator\.codex\model-catalogs\relay-b.json'
+            relay_common_config_contents: r#"model_catalog_json = "C:\\Users\\ExampleUser\\.codex\\model-catalogs\\relay-a.json"
+model_catalog_json = 'C:\Users\ExampleUser\.codex\model-catalogs\relay-b.json'
 model_reasoning_effort = "high"
 "#
             .to_string(),

@@ -13,12 +13,10 @@ pub const MAX_MARKET_SCRIPT_BYTES: usize = 2 * 1024 * 1024;
 const ALLOWED_MARKET_HOSTS: &[&str] = &["raw.githubusercontent.com", "gist.githubusercontent.com"];
 const ZHCN_TRANSLATION_ID: &str = "codex-zhcn-translate";
 const ZHCN_TRANSLATION_VERSION: &str = "1.0";
-const ZHCN_TRANSLATION_STALE_URL: &str =
-    "https://raw.githubusercontent.com/hL091015/CodexPlusPlusScriptMarket/main/scripts/zh_CN%E6%B1%89%E5%8C%96.user.js";
+const ZHCN_TRANSLATION_STALE_URL: &str = "https://raw.githubusercontent.com/hL091015/CodexPlusPlusScriptMarket/main/scripts/zh_CN%E6%B1%89%E5%8C%96.user.js";
 const ZHCN_TRANSLATION_STALE_SHA256: &str =
     "72214d31d425d1ce936b457aa43fcc40df55f4de3b9b140f9510c7f392cdc845";
-const ZHCN_TRANSLATION_PINNED_URL: &str =
-    "https://raw.githubusercontent.com/hL091015/CodexPlusPlusScriptMarket/0c4ece6b70f8e09599a03ed1d306acea73c3685d/scripts/zh_CN%E6%B1%89%E5%8C%96.user.js";
+const ZHCN_TRANSLATION_PINNED_URL: &str = "https://raw.githubusercontent.com/hL091015/CodexPlusPlusScriptMarket/0c4ece6b70f8e09599a03ed1d306acea73c3685d/scripts/zh_CN%E6%B1%89%E5%8C%96.user.js";
 const ZHCN_TRANSLATION_PINNED_SHA256: &str =
     "be19a7930116dfe8fa1c68571d6a3bb3130714f77c7e32a6c1da543a182270f5";
 
@@ -137,7 +135,9 @@ fn resolve_market_script_for_install(script: &MarketScript) -> MarketScript {
     if script.id == ZHCN_TRANSLATION_ID
         && script.version == ZHCN_TRANSLATION_VERSION
         && script.script_url == ZHCN_TRANSLATION_STALE_URL
-        && script.sha256.eq_ignore_ascii_case(ZHCN_TRANSLATION_STALE_SHA256)
+        && script
+            .sha256
+            .eq_ignore_ascii_case(ZHCN_TRANSLATION_STALE_SHA256)
     {
         return MarketScript {
             script_url: ZHCN_TRANSLATION_PINNED_URL.to_string(),

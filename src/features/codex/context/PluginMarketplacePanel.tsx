@@ -26,7 +26,7 @@ function MarketplaceStatus({
       <dl>
         <div><dt>市场目录</dt><dd title={status?.marketplaceRoot ?? status?.codexHome ?? ''}>{status?.marketplaceRoot ?? status?.codexHome ?? '-'}</dd></div>
         <div><dt>配置注册</dt><dd>{status?.configRegistered ? '已注册' : '未注册'}</dd></div>
-        <div><dt>插件 / Skills</dt><dd>{status ? `${status.pluginCount ?? 0} / ${status.skillCount ?? 0}` : '-'}</dd></div>
+        <div><dt>插件 / 技能</dt><dd>{status ? `${status.pluginCount ?? 0} / ${status.skillCount ?? 0}` : '-'}</dd></div>
       </dl>
       <LoadingButton type="button" busy={busy} disabled={disabled} onClick={onRepair}><Wrench size={14} />初始化/修复</LoadingButton>
     </article>

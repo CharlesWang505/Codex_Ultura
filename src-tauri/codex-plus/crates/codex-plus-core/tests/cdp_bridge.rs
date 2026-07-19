@@ -314,14 +314,44 @@ fn injection_script_localizes_codex_menu_commands() {
     assert!(script.contains("[\"Toggle Sidebar\", \"切换侧边栏\"]"));
     assert!(script.contains("[\"Toggle Bottom Panel\", \"切换底部面板\"]"));
     assert!(script.contains("[\"Toggle Pinned Summary\", \"切换置顶摘要\"]"));
+    assert!(script.contains("[\"Toggle Review Panel\", \"切换审查面板\"]"));
     assert!(script.contains("[\"Open Terminal\", \"打开终端\"]"));
     assert!(script.contains("[\"Open Browser Tab\", \"打开浏览器标签页\"]"));
     assert!(script.contains("[\"Focus Browser Address Bar\", \"聚焦浏览器地址栏\"]"));
     assert!(script.contains("[\"Reload Browser Page\", \"重新加载浏览器页面\"]"));
     assert!(script.contains("[\"Toggle Side Panel\", \"切换侧边面板\"]"));
     assert!(script.contains("[\"Actual Size\", \"实际大小\"]"));
+    assert!(script.contains("[\"Documentation\", \"Codex 文档\"]"));
+    assert!(script.contains("[\"What's New\", \"更新内容\"]"));
+    assert!(script.contains("[\"System Status\", \"系统状态\"]"));
+    assert!(script.contains("[\"Start Performance Trace\", \"开始性能跟踪\"]"));
+    assert!(script.contains("[\"About ChatGPT\", \"关于 ChatGPT\"]"));
+    assert!(script.contains("[\"Toggle Query Devtools\", \"切换查询 DevTools\"]"));
+    assert!(script.contains("[\"Go to Chat 9\", \"转到对话 9\"]"));
+    assert!(script.contains("[\"custom\", \"自定义\"]"));
+    assert!(script.contains("const codexMenuLocalizationFoldedMap = new Map"));
+    assert!(script.contains("function normalizeCodexMenuLabel"));
+    assert!(script.contains("function localizedCodexMenuLabel"));
     assert!(script.contains("function localizeCodexMenus"));
     assert!(script.contains("localizeCodexMenus();"));
+}
+
+#[test]
+fn injection_script_localizes_plugin_marketplace_only_in_chinese_mode() {
+    let script = assets::injection_script(57321);
+
+    assert!(script.contains("const codexPluginMarketplaceLocalizationMap = new Map"));
+    assert!(script.contains("[\"Featured\", \"精选\"]"));
+    assert!(script.contains("[\"Computer Use\", \"计算机操作\"]"));
+    assert!(script.contains("[\"Spreadsheets\", \"电子表格\"]"));
+    assert!(script.contains("[\"Productivity\", \"生产力\"]"));
+    assert!(script.contains("[\"Developer Tools\", \"开发者工具\"]"));
+    assert!(script.contains("codexPluginMarketplaceLocalizationNormalizedMap"));
+    assert!(script.contains("function codexPluginMarketplaceRoot"));
+    assert!(script.contains("function localizeCodexPluginMarketplace"));
+    assert!(script.contains("window.__CODEX_PLUS_FORCE_CHINESE_LOCALE__?.enabled === true"));
+    assert!(script.contains("localizeCodexPluginMarketplace();"));
+    assert!(script.contains("runScanStep(localizeCodexPluginMarketplace)"));
 }
 
 #[test]
@@ -634,7 +664,9 @@ fn injection_script_exposes_fast_service_tier_control() {
     assert!(script.contains("normalizeCodexServiceTierControlMode(state.mode) !== \"custom\""));
     assert!(script.contains("state.draft = null"));
     assert!(!script.contains("后端未连接，无法切换服务模式"));
-    assert!(script.contains("const fastDisabled = !featureEnabled || codexServiceTierState.status === \"loading\""));
+    assert!(script.contains(
+        "const fastDisabled = !featureEnabled || codexServiceTierState.status === \"loading\""
+    ));
     assert!(script.contains("未连接"));
     assert!(script.contains("thread/start"));
     assert!(script.contains("thread/resume"));

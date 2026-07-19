@@ -1,3 +1,5 @@
+#[cfg(windows)]
+use std::collections::HashMap;
 use std::ffi::OsStr;
 #[cfg(windows)]
 use std::ffi::OsString;
@@ -9,12 +11,16 @@ use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 #[cfg(windows)]
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 #[cfg(windows)]
 use anyhow::Context;
 #[cfg(windows)]
 use windows::Win32::Foundation::{BOOL, CloseHandle, HANDLE, HWND, LPARAM, MAX_PATH, WPARAM};
+#[cfg(windows)]
+use windows::Win32::Graphics::Dwm::{
+    DWMWINDOWATTRIBUTE, DwmGetWindowAttribute, DwmSetWindowAttribute,
+};
 #[cfg(windows)]
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
@@ -417,6 +423,123 @@ pub fn apply_codexplusplus_icon_to_process_window(
 }
 
 #[cfg(windows)]
+pub fn apply_codex_title_bar_text_color_to_process_window(
+    process_id: u32,
+    color: crate::theme_studio::ThemeTitleBarTextColor,
+) -> bool {
+    let Some(hwnd) = visible_window_for_process(process_id) else {
+        return false;
+    };
+    let color_ref = match color {
+        crate::theme_studio::ThemeTitleBarTextColor::Default => 0xFFFF_FFFFu32,
+        crate::theme_studio::ThemeTitleBarTextColor::Black => 0x0000_0000u32,
+        crate::theme_studio::ThemeTitleBarTextColor::White => 0x00FF_FFFFu32,
+    };
+    let text_color_applied = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWINDOWATTRIBUTE(36),
+            std::ptr::from_ref(&color_ref).cast(),
+            std::mem::size_of_val(&color_ref) as u32,
+        )
+        .is_ok()
+    };
+    let dark_mode_applied = match immersive_dark_mode_for_title_bar_color(color) {
+        Some(dark_mode) => {
+            remember_original_title_bar_dark_mode(process_id, hwnd);
+            apply_title_bar_dark_mode(hwnd, dark_mode)
+        }
+        None => restore_original_title_bar_dark_mode(process_id, hwnd),
+    };
+    // The immersive dark-mode attribute is what actually flips the native
+    // caption buttons between light and dark glyphs, so treat it as the source of
+    // truth. Some Windows 11 builds reject the caption text-color attribute (36)
+    // even though the set call reports success elsewhere; requiring both flags
+    // caused the launcher to burn all 30 retries and report failure while the
+    // buttons were in fact already visible. Prefer the dark-mode result, and only
+    // fall back to the text-color result when dark mode reported no change.
+    dark_mode_applied || text_color_applied
+}
+
+#[cfg(windows)]
+fn immersive_dark_mode_for_title_bar_color(
+    color: crate::theme_studio::ThemeTitleBarTextColor,
+) -> Option<i32> {
+    match color {
+        crate::theme_studio::ThemeTitleBarTextColor::Default => None,
+        crate::theme_studio::ThemeTitleBarTextColor::Black => Some(0),
+        crate::theme_studio::ThemeTitleBarTextColor::White => Some(1),
+    }
+}
+
+#[cfg(windows)]
+fn title_bar_dark_mode_store() -> &'static Mutex<HashMap<(u32, isize), i32>> {
+    static ORIGINAL_DARK_MODES: OnceLock<Mutex<HashMap<(u32, isize), i32>>> = OnceLock::new();
+    ORIGINAL_DARK_MODES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(windows)]
+fn title_bar_dark_mode_key(process_id: u32, hwnd: HWND) -> (u32, isize) {
+    (process_id, hwnd.0 as isize)
+}
+
+#[cfg(windows)]
+fn remember_original_title_bar_dark_mode(process_id: u32, hwnd: HWND) {
+    let key = title_bar_dark_mode_key(process_id, hwnd);
+    let Ok(mut originals) = title_bar_dark_mode_store().lock() else {
+        return;
+    };
+    if originals.contains_key(&key) {
+        return;
+    }
+    if let Some(original) = read_title_bar_dark_mode(hwnd) {
+        originals.insert(key, original);
+    }
+}
+
+#[cfg(windows)]
+fn restore_original_title_bar_dark_mode(process_id: u32, hwnd: HWND) -> bool {
+    let key = title_bar_dark_mode_key(process_id, hwnd);
+    let original = title_bar_dark_mode_store()
+        .lock()
+        .ok()
+        .and_then(|mut originals| originals.remove(&key));
+    original.is_none_or(|value| apply_title_bar_dark_mode(hwnd, value))
+}
+
+#[cfg(windows)]
+fn read_title_bar_dark_mode(hwnd: HWND) -> Option<i32> {
+    for attribute in [20, 19] {
+        let mut value = 0i32;
+        if unsafe {
+            DwmGetWindowAttribute(
+                hwnd,
+                DWMWINDOWATTRIBUTE(attribute),
+                std::ptr::from_mut(&mut value).cast(),
+                std::mem::size_of_val(&value) as u32,
+            )
+            .is_ok()
+        } {
+            return Some(value);
+        }
+    }
+    None
+}
+
+#[cfg(windows)]
+fn apply_title_bar_dark_mode(hwnd: HWND, value: i32) -> bool {
+    [20, 19].into_iter().any(|attribute| unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWINDOWATTRIBUTE(attribute),
+            std::ptr::from_ref(&value).cast(),
+            std::mem::size_of_val(&value) as u32,
+        )
+        .is_ok()
+    })
+}
+
+#[cfg(windows)]
 fn query_process_image_path(process_id: u32) -> Option<PathBuf> {
     let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id).ok()? };
     if handle.is_invalid() {
@@ -657,5 +780,24 @@ mod background_command_tests {
         assert!(!remote.contains("Command::new(\"ssh\")"));
         assert!(remote.contains("windows_integration::background_command(\"ssh\")"));
         assert!(watcher.contains("windows_integration::silent_background_command(exe)"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn title_bar_button_mode_tracks_requested_glyph_color() {
+        use crate::theme_studio::ThemeTitleBarTextColor;
+
+        assert_eq!(
+            super::immersive_dark_mode_for_title_bar_color(ThemeTitleBarTextColor::Black),
+            Some(0)
+        );
+        assert_eq!(
+            super::immersive_dark_mode_for_title_bar_color(ThemeTitleBarTextColor::White),
+            Some(1)
+        );
+        assert_eq!(
+            super::immersive_dark_mode_for_title_bar_color(ThemeTitleBarTextColor::Default),
+            None
+        );
     }
 }

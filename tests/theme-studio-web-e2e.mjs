@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { chromium } from 'playwright'
 
 const port = 5187
 const baseUrl = `http://127.0.0.1:${port}`
 const outputDir = path.resolve('output/playwright/theme-studio')
+const enfpWallpaper = `data:image/webp;base64,${(
+  await readFile(path.resolve('src-tauri/codex-plus/assets/theme-studio/enfp-doodle-wallpaper.webp'))
+).toString('base64')}`
 
 const visual = {
   accent: '#c95f7b',
@@ -34,7 +37,7 @@ const showcaseBase = {
   showCards: true,
 }
 
-function showcase(eyebrow, title, subtitle, cardTitles) {
+function showcase(eyebrow, title, subtitle, cardTitles, cardPrompts = []) {
   const icons = ['code', 'build', 'review', 'repair']
   return {
     ...structuredClone(showcaseBase),
@@ -43,7 +46,7 @@ function showcase(eyebrow, title, subtitle, cardTitles) {
     subtitle,
     cards: cardTitles.map((cardTitle, index) => ({
       title: cardTitle,
-      prompt: `${cardTitle}。请分析当前项目并完成对应任务、测试与结果说明。`,
+      prompt: cardPrompts[index] ?? `${cardTitle}。请分析当前项目并完成对应任务、测试与结果说明。`,
       icon: icons[index],
     })),
   }
@@ -115,14 +118,20 @@ const themes = [
     id: 'enfp-doodle', name: 'ENFP 灵感宇宙', description: '彩色草图纸、原创动漫创作者与高能灵感宇宙。',
     background: '#fffdf3', accent: '#12a890',
     showcase: showcase(
-      'ENFP 灵感模式 · Codex Compass',
+      'ENFP · 灵感发动机已启动 ♥',
       '先有灵感，再把它变成真的',
-      '脑暴、试错、快速原型，最后都能落地。',
+      'ENFP 模式：脑暴、试错、灵感乱飞，但最后都能落地。',
       ['灵感脑暴', '快速原型', '边玩边改', '欢乐修 Bug'],
+      [
+        '把脑子里的一万种可能都倒出来！请围绕当前项目快速脑暴并筛选方向。',
+        '想法不等人，先跑起来再说！请快速完成可运行原型。',
+        '改到爽为止，体验即正义！请边验证边改进交互与实现。',
+        'Bug 不可怕，把它变成段子吧！请定位根因并补充回归测试。',
+      ],
     ),
     presentation: {
-      layoutStyle: 'doodle', cardStyle: 'outline', motifStyle: 'doodles', headerBadge: 'ENERGY 100%',
-      heroPosition: 'far-right', overlayStrength: 84, taskWallpaperOpacity: 6, taskMode: 'ambient',
+      layoutStyle: 'doodle', cardStyle: 'outline', motifStyle: 'doodles', headerBadge: '好点子 +99',
+      heroPosition: 'far-right', overlayStrength: 88, taskWallpaperOpacity: 5, taskMode: 'ambient',
     },
   },
   {
@@ -172,11 +181,11 @@ const themes = [
   name,
   description,
   author: 'Codex Compass',
-  version: '2.1.0',
+  version: id === 'enfp-doodle' ? '2.2.0' : '2.1.0',
   license: 'AI-generated original asset',
   builtin: true,
   decorativeStyle: 'botanical',
-  wallpaperDataUrl: wallpaper(background, accent),
+  wallpaperDataUrl: id === 'enfp-doodle' ? enfpWallpaper : wallpaper(background, accent),
   showcase,
   presentation,
   visual: {
@@ -209,6 +218,33 @@ const themeResult = {
   debugPort: 9222,
 }
 
+const marketResult = {
+  ...structuredClone(themeResult),
+  status: 'ok',
+  message: '主题市场已刷新。',
+  market: {
+    schemaVersion: 1,
+    updatedAt: '2026-07-18',
+    themes: [{
+      id: 'market-demo',
+      name: '市场演示主题',
+      version: '1.0.0',
+      author: 'CodexPlusPlus-Themes',
+      description: '用于验证主题市场三列布局和安装状态。',
+      license: 'MIT',
+      sourceUrl: 'https://github.com/BigPizzaV3/CodexPlusPlus-Themes',
+      tags: ['demo', 'market'],
+      previewUrl: wallpaper('#eef7ff', '#2d7fd3'),
+      installed: false,
+      installedVersion: '',
+      updateAvailable: false,
+    }],
+  },
+  cached: false,
+  warning: '',
+  repositoryUrl: 'https://github.com/BigPizzaV3/CodexPlusPlus-Themes',
+}
+
 const server = spawn(
   process.execPath,
   ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
@@ -224,7 +260,7 @@ try {
   const page = await context.newPage()
   page.on('console', (message) => console.log(`[browser:${message.type()}] ${message.text()}`))
   page.on('pageerror', (error) => console.error(`[browser:error] ${error.stack ?? error.message}`))
-  await page.addInitScript((initialThemeResult) => {
+  await page.addInitScript(({ initialThemeResult, initialMarketResult }) => {
     let callbackId = 0
     let currentTheme = structuredClone(initialThemeResult)
     const settingsResult = {
@@ -249,7 +285,7 @@ try {
       unregisterCallback: () => undefined,
       convertFileSrc: (value) => value,
       invoke: async (command, args) => {
-        if (command === 'app_version') return '1.3.33'
+        if (command === 'app_version') return '1.3.52'
         if (command === 'load_sites') return []
         if (command === 'load_app_preferences') return { closeBehavior: 'ask' }
         if (command === 'load_settings') return settingsResult
@@ -261,7 +297,7 @@ try {
           silentShortcut: { status: 'ok', path: 'C:\\Codex.lnk' },
           managementShortcut: { status: 'ok', path: 'C:\\Codex Compass.lnk' },
           latestLaunch: null,
-          currentVersion: '1.3.33',
+          currentVersion: '1.3.52',
           updateStatus: 'not_checked',
           settingsPath: 'C:\\mock\\settings.json',
           logsPath: 'C:\\mock\\logs',
@@ -297,6 +333,7 @@ try {
           registrationValid: false,
         }
         if (command === 'load_codex_theme_studio') return structuredClone(currentTheme)
+        if (command === 'refresh_theme_market') return structuredClone(initialMarketResult)
         if (command === 'save_codex_theme_studio') {
           currentTheme = {
             ...currentTheme,
@@ -315,7 +352,7 @@ try {
         return null
       },
     }
-  }, themeResult)
+  }, { initialThemeResult: themeResult, initialMarketResult: marketResult })
 
   await page.goto(baseUrl, { waitUntil: 'networkidle' })
   const themeNavigation = page.getByRole('button', { name: '主题工坊' })
@@ -328,11 +365,32 @@ try {
   }
   await themeNavigation.click()
   await page.getByRole('heading', { name: '玫瑰灵感' }).waitFor()
+  const noticeViewport = page.locator('#codex-notice-viewport')
+  await noticeViewport.waitFor()
+  assert.equal(await noticeViewport.evaluate((element) => getComputedStyle(element).position), 'fixed')
+  const studioHeaderBox = await page.locator('.theme-studio-header').boundingBox()
+  assert.ok(studioHeaderBox && studioHeaderBox.y < 190, `theme header was pushed down to ${studioHeaderBox?.y}`)
   assert.equal(await page.locator('.theme-card').count(), 8)
+  assert.equal(
+    await page.locator('.theme-card-grid').evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length),
+    3,
+  )
+  await page.getByRole('tab', { name: '主题市场' }).click()
+  await page.locator('.theme-market-card').waitFor()
+  assert.equal(await page.locator('.theme-market-card').count(), 1)
+  assert.equal(
+    await page.locator('.theme-market-grid').evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length),
+    3,
+  )
+  await page.screenshot({ path: path.join(outputDir, 'market-zh.png'), fullPage: true })
+  await page.getByRole('tab', { name: '我的主题' }).click()
   await page.getByText(/themes-v3\.json/).waitFor()
   await page.getByText('首页展示', { exact: true }).waitFor()
   assert.equal(await page.locator('.theme-preview-showcase-cards button').count(), 4)
   assert.equal(await page.locator('.theme-showcase-card-list article').count(), 4)
+  const editorLayout = page.locator('.theme-editor-layout')
+  const previewSection = page.locator('.theme-preview-section')
+  const controlsSection = page.locator('.theme-controls-section')
   const codexPreview = page.locator('.theme-codex-preview')
   const previewSidebar = codexPreview.locator('aside')
   const previewMain = codexPreview.locator('main')
@@ -369,6 +427,27 @@ try {
   assert.equal(await headerBadgeInput.count(), 1)
   assert.equal(await overlaySlider.count(), 1)
   assert.equal(await taskWallpaperSlider.count(), 1)
+  assert.equal(
+    await editorLayout.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length),
+    1,
+  )
+  assert.equal(
+    await page.locator('.theme-showcase-card-list').evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length),
+    2,
+  )
+  const desktopPreviewBox = await previewSection.boundingBox()
+  const desktopControlsBox = await controlsSection.boundingBox()
+  assert.ok(desktopPreviewBox && desktopControlsBox, 'theme editor sections must be visible')
+  assert.ok(
+    desktopControlsBox.y >= desktopPreviewBox.y + desktopPreviewBox.height - 1,
+    `theme controls should be below preview: preview=${JSON.stringify(desktopPreviewBox)} controls=${JSON.stringify(desktopControlsBox)}`,
+  )
+  assert.ok(
+    Math.abs(desktopPreviewBox.width - desktopControlsBox.width) <= 2,
+    `theme editor sections should have equal width: preview=${desktopPreviewBox.width} controls=${desktopControlsBox.width}`,
+  )
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false)
+  await controlsSection.screenshot({ path: path.join(outputDir, 'theme-controls-desktop-zh.png') })
 
   for (const theme of themes) {
     const themeButton = page.getByRole('button', { name: new RegExp(theme.name) })
@@ -405,13 +484,86 @@ try {
     assert.equal(await showcasePreview.locator('h2').innerText(), theme.showcase.title)
     assert.equal(await showcasePreview.locator('p').innerText(), theme.showcase.subtitle)
     assert.deepEqual(
-      await showcasePreview.locator('.theme-preview-showcase-cards button').allInnerTexts(),
+      await showcasePreview.locator('.theme-preview-showcase-cards button > span > strong').allInnerTexts(),
       theme.showcase.cards.map((card) => card.title),
     )
     assert.equal(await showcasePreview.locator('.theme-preview-header-badge').innerText(), theme.presentation.headerBadge)
     assert.equal(await showcasePreview.locator('.theme-preview-motif').count(), 1)
     assert.equal(await showcasePreview.locator('.theme-preview-showcase-cards button').count(), 4)
   }
+  await page.getByRole('button', { name: /ENFP 灵感宇宙/ }).click()
+  await page.getByRole('heading', { name: 'ENFP 灵感宇宙' }).waitFor()
+  assert.equal(await page.locator('.theme-editor-layout').getAttribute('class'), 'theme-editor-layout theme-editor-layout-concept')
+  assert.equal(await showcasePreview.locator('.theme-preview-enfp-brand strong').innerText(), 'ENFP')
+  assert.equal(await showcasePreview.locator('.theme-preview-enfp-brand span').innerText(), '灵感发动机已启动 ♥')
+  assert.equal(await showcasePreview.locator('.theme-preview-enfp-tags span').count(), 4)
+  assert.equal(await showcasePreview.locator('.theme-preview-enfp-bubbles span').count(), 2)
+  assert.equal(await showcasePreview.locator('.theme-preview-enfp-skin').count(), 1)
+  assert.equal(await showcasePreview.locator('.theme-preview-enfp-mood').count(), 1)
+  assert.equal(await showcasePreview.locator('.theme-preview-showcase-cards button small').count(), 4)
+  assert.equal(
+    await showcasePreview.locator('.theme-preview-showcase-cards').evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length),
+    4,
+  )
+  const enfpTitle = showcasePreview.locator('h2')
+  const enfpTitleMetrics = await enfpTitle.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return {
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      fontFamily: style.fontFamily,
+      fontWeight: style.fontWeight,
+      whiteSpace: style.whiteSpace,
+    }
+  })
+  assert.match(enfpTitleMetrics.fontFamily, /STXingkai/)
+  assert.equal(enfpTitleMetrics.fontWeight, '400')
+  assert.equal(enfpTitleMetrics.whiteSpace, 'nowrap')
+  assert.ok(enfpTitleMetrics.scrollWidth <= enfpTitleMetrics.clientWidth + 1, `ENFP title overflowed by ${enfpTitleMetrics.scrollWidth - enfpTitleMetrics.clientWidth}px`)
+  assert.equal(await previewSidebar.locator('.theme-preview-enfp-energy').count(), 1)
+  assert.equal(await previewSidebar.getAttribute('class'), 'theme-preview-sidebar-enfp')
+  assert.equal(await previewSidebar.locator('.theme-preview-enfp-search').count(), 1)
+  assert.equal(await previewSidebar.locator('.theme-preview-enfp-nav button').count(), 6)
+  assert.equal(await previewSidebar.locator('.theme-preview-enfp-heading').count(), 2)
+  assert.equal(await previewSidebar.locator('.theme-preview-enfp-thread').count(), 5)
+  assert.equal(await previewSidebar.locator('.theme-preview-enfp-task').count(), 5)
+  assert.equal(await previewSidebar.locator('.theme-preview-enfp-account').count(), 1)
+  assert.equal(
+    await previewSidebar.locator('.theme-preview-enfp-scroll').evaluate(
+      (element) => element.scrollHeight <= element.clientHeight + 1,
+    ),
+    true,
+  )
+  assert.equal(await previewComposer.getByText('对 ENFP 助手说点什么…', { exact: true }).count(), 1)
+  await page.screenshot({ path: path.join(outputDir, 'enfp-concept-zh.png'), fullPage: true })
+  await codexPreview.screenshot({ path: path.join(outputDir, 'enfp-concept-codex-zh.png') })
+  await showcasePreview.screenshot({ path: path.join(outputDir, 'enfp-concept-preview-zh.png') })
+  await page.setViewportSize({ width: 760, height: 900 })
+  assert.equal(
+    await showcasePreview.locator('.theme-preview-showcase-cards').evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length),
+    2,
+  )
+  assert.equal(await enfpTitle.evaluate((element) => getComputedStyle(element).whiteSpace), 'normal')
+  assert.equal(await showcasePreview.locator('.theme-preview-enfp-bubbles').evaluate((element) => getComputedStyle(element).display), 'none')
+  assert.equal(
+    await editorLayout.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length),
+    1,
+  )
+  assert.equal(
+    await page.locator('.theme-showcase-card-list').evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length),
+    1,
+  )
+  const compactPreviewBox = await previewSection.boundingBox()
+  const compactControlsBox = await controlsSection.boundingBox()
+  assert.ok(compactPreviewBox && compactControlsBox, 'compact theme editor sections must be visible')
+  assert.ok(
+    compactControlsBox.y >= compactPreviewBox.y + compactPreviewBox.height - 1,
+    `compact theme controls should be below preview: preview=${JSON.stringify(compactPreviewBox)} controls=${JSON.stringify(compactControlsBox)}`,
+  )
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false)
+  await controlsSection.screenshot({ path: path.join(outputDir, 'theme-controls-compact-zh.png') })
+  await codexPreview.screenshot({ path: path.join(outputDir, 'enfp-concept-compact-zh.png') })
+  await page.setViewportSize({ width: 1440, height: 1000 })
   await page.getByRole('button', { name: /玫瑰灵感/ }).click()
 
   await layoutSelect.selectOption('fortune')
@@ -461,7 +613,7 @@ try {
   await page.getByText('Home Showcase', { exact: true }).waitFor()
   await page.getByRole('heading', { name: 'Butterfly Starlight' }).waitFor()
   await page.getByText('What should we build?', { exact: true }).waitFor()
-  await page.getByText('Explore the code map', { exact: true }).waitFor()
+  await showcasePreview.locator('.theme-preview-showcase-cards button > span > strong').filter({ hasText: 'Explore the code map' }).waitFor()
   await scrollAllToTop(page)
   await page.screenshot({ path: path.join(outputDir, 'desktop-en.png') })
 

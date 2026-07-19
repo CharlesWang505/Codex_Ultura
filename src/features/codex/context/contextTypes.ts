@@ -10,9 +10,9 @@ export type ContextDraft = {
 }
 
 export const CONTEXT_KIND_LABELS: Record<ContextKind, string> = {
-  mcp: 'MCP Servers',
-  skill: 'Skills',
-  plugin: 'Plugins',
+  mcp: 'MCP 服务器',
+  skill: '技能',
+  plugin: '插件',
 }
 
 export function setContextEnabled(tomlBody: string, enabled: boolean) {

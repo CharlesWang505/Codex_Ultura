@@ -244,6 +244,7 @@ pub fn run() {
             if !watcher_hidden {
                 app_preferences::setup_tray(app)?;
                 codex_floating::setup(app)?;
+                spawn_title_bar_text_color_sync();
             }
 
             let hot_switch_runtime = codex_plus_manager_lib::commands::HotSwitchRuntime::default();
@@ -352,6 +353,8 @@ pub fn run() {
             codex_plus_manager_lib::commands::reload_user_scripts,
             codex_plus_manager_lib::commands::delete_user_script,
             codex_plus_manager_lib::commands::load_codex_theme_studio,
+            codex_plus_manager_lib::commands::refresh_theme_market,
+            codex_plus_manager_lib::commands::install_theme_market_theme,
             codex_plus_manager_lib::commands::save_codex_theme_studio,
             codex_plus_manager_lib::commands::reload_codex_theme_studio,
             codex_plus_manager_lib::commands::reset_codex_theme_studio,
@@ -373,6 +376,7 @@ pub fn run() {
             codex_plus_manager_lib::commands::enable_watcher,
             codex_plus_manager_lib::commands::disable_watcher,
             codex_plus_manager_lib::commands::read_latest_logs,
+            codex_plus_manager_lib::commands::clear_logs,
             codex_plus_manager_lib::commands::copy_diagnostics,
             codex_plus_manager_lib::commands::reset_settings,
             codex_plus_manager_lib::commands::reset_image_overlay_settings,
@@ -435,6 +439,22 @@ where
         hidden |= arg.as_ref() == "--hidden";
     }
     watcher && hidden
+}
+
+/// Periodically re-apply the active theme's native title-bar glyph color to any
+/// open Codex window. The launcher hook only fires when Compass itself starts
+/// Codex, and `apply_theme_runtime` only runs on explicit theme commands, so a
+/// window the user closes and reopens by hand would otherwise keep the system
+/// default dark caption and strand the light-theme buttons. A lightweight poll
+/// keeps every window in sync without depending on the CDP debug port.
+fn spawn_title_bar_text_color_sync() {
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(3));
+        loop {
+            interval.tick().await;
+            codex_plus_manager_lib::commands::sync_codex_title_bar_text_color_now();
+        }
+    });
 }
 
 fn setup_hidden_watcher(app: AppHandle) -> tauri::Result<()> {
