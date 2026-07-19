@@ -6,24 +6,6 @@ Codex Compass（中文名：法典指南针）是一款基于 Tauri 2、Rust、R
 
 **当前稳定版：v1.3.57（2026-07-19）**
 
-## 下载
-
-请只从本项目的 [GitHub Releases](https://github.com/CharlesWang505/Codex_Compass_Conprehensive/releases/latest) 下载。
-
-| 版本 | 文件 | 适用场景 |
-| --- | --- | --- |
-| 安装版 | [Codex.Compass_1.3.57_x64-setup.exe](https://github.com/CharlesWang505/Codex_Compass_Conprehensive/releases/download/v1.3.57/Codex.Compass_1.3.57_x64-setup.exe) | 当前用户安装，注册快捷方式和卸载信息 |
-| 免安装版 | [Codex.Compass_1.3.57_x64-portable.exe](https://github.com/CharlesWang505/Codex_Compass_Conprehensive/releases/download/v1.3.57/Codex.Compass_1.3.57_x64-portable.exe) | 直接运行，适合测试或便携使用 |
-
-SHA-256：
-
-```text
-A100BBB7CE9B5C7493473149B93A954ECB45FAFA3B008B4A97BBB5601CD9EA81  Codex.Compass_1.3.57_x64-portable.exe
-2D1B1565D912801866831BBAFBE2FED5A81F7925C843EA26F38CA98A431812D3  Codex.Compass_1.3.57_x64-setup.exe
-```
-
-当前公开构建未进行商业代码签名，Windows SmartScreen 可能显示“未知发布者”。下载后应核对文件哈希。完整操作说明见 [Codex Compass 使用手册](./docs/USER_MANUAL.md)。
-
 > **先记住这个隐藏按钮：左上角的闪电图标不是装饰。点击它可以启动 Codex；Codex 已在运行时，点击它会重启 Codex。** 重新生成模型目录或更新注入模型后，需要点击这个按钮让新目录生效。
 
 ## v1.3.57 重点更新
