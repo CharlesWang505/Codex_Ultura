@@ -4,7 +4,7 @@ Codex Compass（中文名：法典指南针）是一款基于 Tauri 2、Rust、R
 
 本项目参考并基于 [CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus) 与 [codex-api-hot-switch](https://github.com/BandengHu/codex-api-hot-switch) 的部分功能进行整合和完善，目标是让用户通过一个配套软件完成中转站查看、供应商配置、模型注入、热切换和常用 Codex 维护。
 
-**当前稳定版：v1.3.57（2026-07-19）**用户使用手册见[用户使用手册](https://github.com/CharlesWang505/Codex_Compass_Conprehensive/blob/main/docs/USER_MANUAL.md)
+[当前稳定版：v1.3.57（2026-07-19）],用户使用手册见[用户使用手册](https://github.com/CharlesWang505/Codex_Compass_Conprehensive/blob/main/docs/USER_MANUAL.md)。
 
 > **先记住这个隐藏按钮：左上角的闪电图标不是装饰。点击它可以启动 Codex；Codex 已在运行时，点击它会重启 Codex。** 重新生成模型目录或更新注入模型后，需要点击这个按钮让新目录生效。
 
