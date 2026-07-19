@@ -4,9 +4,36 @@ Codex Compass（中文名：法典指南针）是一款基于 Tauri 2、Rust、R
 
 本项目参考并基于 [CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus) 与 [codex-api-hot-switch](https://github.com/BandengHu/codex-api-hot-switch) 的部分功能进行整合和完善，目标是让用户通过一个配套软件完成中转站查看、供应商配置、模型注入、热切换和常用 Codex 维护。
 
-从 [GitHub Releases](https://github.com/CharlesWang505/Codex_Ultura/releases/latest) 下载最新版安装包，完整操作说明见 [Codex Compass 使用手册](./docs/USER_MANUAL.md)。
+**当前稳定版：v1.3.57（2026-07-19）**
+
+## 下载
+
+请只从本项目的 [GitHub Releases](https://github.com/CharlesWang505/Codex_Compass_Conprehensive/releases/latest) 下载。
+
+| 版本 | 文件 | 适用场景 |
+| --- | --- | --- |
+| 安装版 | [Codex.Compass_1.3.57_x64-setup.exe](https://github.com/CharlesWang505/Codex_Compass_Conprehensive/releases/download/v1.3.57/Codex.Compass_1.3.57_x64-setup.exe) | 当前用户安装，注册快捷方式和卸载信息 |
+| 免安装版 | [Codex.Compass_1.3.57_x64-portable.exe](https://github.com/CharlesWang505/Codex_Compass_Conprehensive/releases/download/v1.3.57/Codex.Compass_1.3.57_x64-portable.exe) | 直接运行，适合测试或便携使用 |
+
+SHA-256：
+
+```text
+A100BBB7CE9B5C7493473149B93A954ECB45FAFA3B008B4A97BBB5601CD9EA81  Codex.Compass_1.3.57_x64-portable.exe
+2D1B1565D912801866831BBAFBE2FED5A81F7925C843EA26F38CA98A431812D3  Codex.Compass_1.3.57_x64-setup.exe
+```
+
+当前公开构建未进行商业代码签名，Windows SmartScreen 可能显示“未知发布者”。下载后应核对文件哈希。完整操作说明见 [Codex Compass 使用手册](./docs/USER_MANUAL.md)。
 
 > **先记住这个隐藏按钮：左上角的闪电图标不是装饰。点击它可以启动 Codex；Codex 已在运行时，点击它会重启 Codex。** 重新生成模型目录或更新注入模型后，需要点击这个按钮让新目录生效。
+
+## v1.3.57 重点更新
+
+- **主题工坊与主题市场**：主题图片改为独立本地资源存储，支持旧主题迁移、远程市场、离线缓存、安装状态和版本更新提示。
+- **ENFP 灵感宇宙主题**：重构新任务首页、左侧会话栏、项目与任务层级、字体排版、快捷任务卡、能量条和紧凑布局。
+- **主题运行时稳定性**：修复侧栏抽动、行内滚动条、设置页误识别、弹层透明遮挡、图片预览不可见及按钮错位。
+- **Windows 标题栏适配**：浅色主题使用深色窗口符号，深色主题使用浅色窗口符号，并周期性同步已打开的 Codex 窗口。
+- **完整中文界面**：工具与插件、Codex 增强、原生菜单和插件市场使用定向中文化，Codex、ChatGPT、PDF、MCP 与第三方品牌名保持英文。
+- **稳定性与诊断**：供应商切换失败可完整回滚，日志支持 50 MB 限容、尾部读取和清理，Windows 应用识别优先使用原生 AppX 接口。
 
 ## 核心模块
 
@@ -43,7 +70,7 @@ Codex
 - 统一管理 `自动 / 关闭 / low / medium / high / xhigh` 推理强度。
 - 可注入“Codex Compass 自动模型”，在 Codex 中选择一次后通过悬浮球实时切换供应商、实际模型和 Reasoning。
 - 悬浮球和快速切换面板。
-- 会话、MCP、Skills、Plugins、Codex 增强和脚本市场。
+- 会话、MCP 服务器、技能、插件、Codex 增强和脚本市场。
 
 8787 网关默认关闭。网关运行时，供应商的 Base URL、协议和 Key 会被锁定，避免运行中的路由配置被改坏；先关闭热切换即可继续编辑。
 
@@ -51,14 +78,18 @@ Codex
 
 ### 3. 手机远控
 
-手机远控通过用户自建的 HTTPS/WSS 中继网站连接本机 Codex app-server。电脑主动建立出站连接，手机可以按 Codex 左侧正式项目查看已有任务会话；未授权项目只允许读取历史，电脑端一键同步或手工授权后才可新建或继续会话、发送问题、选择本机插件 Skills、加密上传附件、接收流式回复并停止生成。插件与技能在手机端使用中文名称和说明，同时保留中英文搜索。Codex 当前有效的本机认证（`apiKey` 或 `chatgpt`）由 app-server 在电脑上复用，认证文件、Cookie、Token 和 API Key 不会发送到中继。
+手机远控通过用户自建的 HTTPS/WSS 中继网站连接本机 Codex app-server。电脑主动建立出站连接，手机可以按 Codex 左侧正式项目查看已有任务会话；未授权项目只允许读取历史，电脑端一键同步或手工授权后才可新建或继续会话、发送问题、选择本机插件和技能、加密上传附件、接收流式回复并停止生成。插件与技能在手机端使用中文名称和说明，同时保留中英文搜索。Codex 当前有效的本机认证（`apiKey` 或 `chatgpt`）由 app-server 在电脑上复用，认证文件、Cookie、Token 和 API Key 不会发送到中继。
 
 远控默认关闭且不提供任何默认公网地址，用户必须部署并填写自己的 HTTPS/WSS 中继；维护者的私人服务器不会写入安装包或分配给其他用户。Relay ZIP 提供 Windows 上传向导和 VPS 一键安装器，可自动配置经过校验的 Node.js、systemd、Nginx、证书和健康检查。执行权限默认不授权任何工作区；“一键同步 Codex 项目”导入的新项目默认禁止修改文件、运行命令和手机上传。公网只部署中继站点，不得暴露本机 8787 或 app-server。局域网配对同样默认关闭，开启后支持电脑生成二维码/六位码邀请手机，也支持手机主动向同网电脑请求绑定；两种方式都必须在电脑端核对校验码并批准。部署前请阅读 [部署说明](./docs/REMOTE_CONTROL_DEPLOYMENT.md)、[协议文档](./docs/REMOTE_CONTROL_PROTOCOL.md)、[安全模型](./docs/REMOTE_CONTROL_SECURITY.md) 和 [app-server 兼容报告](./docs/CODEX_APP_SERVER_COMPATIBILITY.md)。
 ### 4. Codex 主题工坊
 
-“主题工坊”可为 Codex 桌面界面应用本地主题，不修改官方安装包、`app.asar` 或 WindowsApps。它支持四套内置主题、主题复制、颜色与透明度调整、本地壁纸、字体、圆角、玻璃模糊，以及 `.zip` / `.cc-theme` 声明式主题包。新任务首页还可配置品牌文字、标题、横幅、右侧装饰图和四张快捷任务卡；快捷卡只填入提示词，不自动发送。
+“主题工坊”可为 Codex 桌面界面应用本地主题，不修改官方安装包、`app.asar` 或 WindowsApps。它提供蔷薇花笺、ENFP 灵感宇宙、薄荷稿纸、墨夜星图和暖灰手稿五套内置主题，并支持主题复制、颜色与透明度调整、本地壁纸、字体、圆角、玻璃模糊，以及 `.zip` / `.cc-theme` 声明式主题包。
 
-主题通过 Compass 的本机 CDP 注入链应用，Codex 重启后可自动恢复。第三方主题包不能包含 JavaScript、CSS、HTML、可执行文件或远程资源，导入时会限制压缩包路径、大小、文件数量和图片类型。完整格式和安全说明见 [Codex 主题工坊文档](./docs/THEME_STUDIO.md)。
+“我的主题”用于管理内置、复制、导入和已安装主题；“主题市场”从 CodexPlusPlus-Themes 加载社区清单，支持缓存回退、安装、重新安装和更新。市场下载限制为受信任的 HTTPS 主机，并校验主题 ID、相对路径、配置内容、图片格式和 SHA-256。
+
+新任务首页可配置品牌文字、标题、横幅、右侧装饰图和四张快捷任务卡；快捷卡只填入提示词，不自动发送。ENFP 主题还会同步调整左侧会话栏、项目与任务层级、能量条、输入区和标题排版。
+
+主题通过 Compass 的本机 CDP 注入链应用，Codex 重启后可自动恢复。主题运行时会保护设置页、菜单、弹层、代码、Diff、终端和图片预览的可读性，并根据主题亮度同步 Windows 原生标题栏按钮。第三方主题包不能包含 JavaScript、CSS、HTML、可执行文件或远程资源，导入时会限制压缩包路径、大小、文件数量和图片类型。完整格式和安全说明见 [Codex 主题工坊文档](./docs/THEME_STUDIO.md)。
 
 ### 5. 代理测速
 
@@ -144,8 +175,9 @@ Codex
 - 供应商配置：多供应商、多 Key、协议、模型获取、测试、聚合供应商和 Codex 配置应用。
 - 热切换：8787 网关、模型注入、自动路由、映射规则、故障切换、Reasoning 和悬浮切换。
 - 会话管理：搜索、筛选、打开、删除、备份和历史 Provider 修复。
-- 工具与插件：MCP、Skills、Plugins 以及插件市场维护。
-- Codex 增强：页面增强、Stepwise 分步处理和图片覆盖层。
+- 主题工坊：本地主题、主题市场、ENFP 主题、实时预览、主题包与独立图片资源。
+- 工具与插件：MCP 服务器、技能、插件以及插件市场维护。
+- Codex 增强：页面增强、分步处理、图片覆盖层、原生菜单中文化和计算机操作防护。
 - 脚本市场：市场脚本与本地脚本安装、更新、启停和校验。
 - 代理测速：订阅、Mihomo 控制器、内置引擎、延迟矩阵和 CSV。
 - 设置：站点、Codex 路径、Watcher、诊断、数据清理、版本和关于。
@@ -178,6 +210,8 @@ Codex
 站点名称、Base URL、API Key、扩展 Key、令牌名称、User ID、Cookie、登录账号和密码保存在系统应用数据目录的 `sensitive/sites.json`。代理订阅 URL、Mihomo 控制器 Secret、测速目标和订阅节点名称保存在 `sensitive/proxy-latency.json`。
 
 这些数据不会写入公开源码目录或安装包。账户余额、调用日志、IP、请求 ID、模型消耗和订阅数据只保存在运行内存，不持久化到磁盘。
+
+主题配置和本地图片保存在应用数据目录的 `theme-studio/` 下；主题市场联网获取公开清单和资源，远程不可用时会回退到本地缓存。主题市场不会读取或上传站点 Key、Cookie、Codex 认证或本机配置。
 
 公开 Issue、日志或截图前，仍应人工移除真实域名、Key、Cookie、订阅 URL、请求 ID、IP、余额和账户信息。
 
