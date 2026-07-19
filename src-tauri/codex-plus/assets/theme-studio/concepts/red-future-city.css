@@ -1,0 +1,905 @@
+/*
+ * Red Future City concept slice.
+ *
+ * Integration contract:
+ * - The runtime owns all DOM creation, labels, events, and native controls.
+ * - This stylesheet only decorates nodes already identified by Theme Studio.
+ * - Every selector is scoped to the red-future-city root attribute.
+ */
+
+html[data-codex-compass-theme="red-future-city"] {
+  color-scheme: light;
+  --cc-future-red: #d92727;
+  --cc-future-red-deep: #a91920;
+  --cc-future-coral: #ee625d;
+  --cc-future-blush: #f8d9d7;
+  --cc-future-rose-mist: #fff2f0;
+  --cc-future-white: #fffdfc;
+  --cc-future-panel: #fff9f8;
+  --cc-future-ink: #20191a;
+  --cc-future-muted: #766767;
+  --cc-future-border: #ead1cf;
+  --cc-future-shadow: rgba(82, 22, 25, 0.13);
+  --cc-theme-accent: var(--cc-future-red);
+  --cc-theme-accent-soft: var(--cc-future-blush);
+  --cc-theme-bg: #fff8f7;
+  --cc-theme-surface: var(--cc-future-white);
+  --cc-theme-surface-alt: var(--cc-future-panel);
+  --cc-theme-text: var(--cc-future-ink);
+  --cc-theme-muted: var(--cc-future-muted);
+  --cc-theme-border: var(--cc-future-border);
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-sidebar {
+  isolation: isolate;
+  overflow: hidden !important;
+  color: var(--cc-future-ink) !important;
+  border-right: 1px solid color-mix(in srgb, var(--cc-future-red) 16%, var(--cc-future-border)) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 253, 252, 0.99), rgba(255, 248, 247, 0.98)) !important;
+  box-shadow: 10px 0 30px rgba(96, 36, 38, 0.06) !important;
+  backdrop-filter: none !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-sidebar::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(145deg, rgba(217, 39, 39, 0.055), transparent 31%),
+    radial-gradient(circle at 102% 14%, rgba(238, 98, 93, 0.14), transparent 25%),
+    linear-gradient(90deg, transparent 0 96%, rgba(217, 39, 39, 0.035));
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-sidebar::after {
+  content: "";
+  position: absolute;
+  z-index: 4;
+  top: 92px;
+  right: 0;
+  width: 2px;
+  height: min(220px, 29vh);
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent, var(--cc-future-red), transparent);
+  opacity: 0.48;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-product-button {
+  min-height: 56px !important;
+  padding: 8px 12px 8px 48px !important;
+  color: var(--cc-future-ink) !important;
+  border: 0 !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif !important;
+  font-size: 19px !important;
+  font-weight: 760 !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-product-button::before {
+  left: 10px;
+  width: 30px;
+  height: 30px;
+  color: #ffffff;
+  border: 0;
+  border-radius: 7px;
+  background: linear-gradient(145deg, #e13732, #b91920);
+  box-shadow: 0 5px 12px rgba(169, 25, 32, 0.22);
+  font-family: "Segoe UI", sans-serif;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-product-button::after {
+  display: none;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-search-button {
+  color: #59494a !important;
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-search-button:hover {
+  color: var(--cc-future-red) !important;
+  background: var(--cc-future-rose-mist) !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-new-task {
+  min-height: 40px !important;
+  color: #ffffff !important;
+  border: 1px solid #c82126 !important;
+  border-radius: 8px !important;
+  background: linear-gradient(180deg, #e32f30, #ca2026) !important;
+  box-shadow: 0 8px 18px rgba(183, 25, 31, 0.18) !important;
+  font-weight: 700 !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-new-task:hover {
+  color: #ffffff !important;
+  background: linear-gradient(180deg, #ed3d38, #d52228) !important;
+  filter: none !important;
+  transform: translateY(-1px);
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-nav-row {
+  min-height: 34px !important;
+  margin-block: 1px !important;
+  color: #3b3031 !important;
+  border: 1px solid transparent !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  font-size: 13px !important;
+  font-weight: 560 !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-nav-row:hover {
+  color: #281f20 !important;
+  border-color: rgba(217, 39, 39, 0.1) !important;
+  background: #fff1ef !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-nav-row svg {
+  color: var(--cc-future-red) !important;
+  filter: none !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-group-heading {
+  margin-top: 12px !important;
+  padding: 9px 8px 5px 18px !important;
+  color: #8f4f51 !important;
+  border-top: 1px solid rgba(217, 39, 39, 0.12) !important;
+  font-size: 10px !important;
+  font-weight: 780 !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-group-heading::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 12px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--cc-future-red);
+  box-shadow: 0 0 0 3px rgba(217, 39, 39, 0.1);
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-sidebar [data-app-action-sidebar-scroll] {
+  min-height: 0 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-project-row,
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-thread-row {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  min-height: 31px !important;
+  max-height: 33px !important;
+  margin-block: 0 !important;
+  padding-block: 0 !important;
+  overflow: hidden !important;
+  overscroll-behavior: auto !important;
+  border-radius: 5px !important;
+  box-shadow: none !important;
+  scrollbar-width: none;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-project-row::-webkit-scrollbar,
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-thread-row::-webkit-scrollbar {
+  display: none;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-project-row {
+  color: #302526 !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  font-size: 12.5px !important;
+  font-weight: 680 !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-project-row svg {
+  color: var(--cc-future-red) !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-thread-row {
+  position: relative !important;
+  margin-left: 12px !important;
+  padding-left: 16px !important;
+  color: #67585a !important;
+  border: 0 !important;
+  background: transparent !important;
+  font-size: 12px !important;
+  font-weight: 510 !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-thread-row::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  transform: translateY(-50%);
+  border: 1.5px solid #dc5c5a;
+  border-radius: 2px;
+  background: #fff8f7;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-project-row:hover,
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-thread-row:hover {
+  color: #281f20 !important;
+  border-color: transparent !important;
+  background: #fff1ef !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-active-row {
+  color: #7f171c !important;
+  border-color: rgba(217, 39, 39, 0.14) !important;
+  background: linear-gradient(90deg, #fee9e7, #fff8f7) !important;
+  box-shadow: inset 3px 0 0 var(--cc-future-red) !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-active-row::before {
+  border-color: var(--cc-future-red);
+  background: var(--cc-future-red);
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-account-row {
+  color: #302526 !important;
+  border: 1px solid rgba(217, 39, 39, 0.12) !important;
+  background: rgba(255, 249, 248, 0.96) !important;
+  box-shadow: none !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-topbar,
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-sessionbar {
+  color: var(--cc-future-ink) !important;
+  border-color: #ecd7d5 !important;
+  background: rgba(255, 253, 252, 0.98) !important;
+  backdrop-filter: none !important;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-shell-topbar::after {
+  color: #8d2227;
+  border-color: rgba(217, 39, 39, 0.18);
+  background:
+    radial-gradient(circle at 10px 50%, var(--cc-future-red) 0 3px, transparent 3.5px),
+    #fff8f7;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase-host {
+  width: calc(100% - 40px) !important;
+  max-width: 1220px !important;
+  min-height: 536px !important;
+  overflow: visible !important;
+  container-type: inline-size;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city.layout-future {
+  min-height: 536px;
+  grid-template-rows: minmax(316px, 1fr) auto;
+  gap: 0;
+  padding: 34px 34px 24px;
+  overflow: hidden;
+  color: var(--cc-future-ink);
+  border: 0;
+  border-radius: 0;
+  background-color: #fff9f8;
+  background-image: var(--cc-showcase-hero, url("../red-future-city-wallpaper.webp"));
+  background-position: 72% center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  box-shadow: none;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city.layout-future::before {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(255, 253, 252, 0.985) 0%,
+      rgba(255, 253, 252, 0.94) 34%,
+      rgba(255, 250, 249, 0.58) 52%,
+      rgba(255, 250, 249, 0.08) 73%,
+      transparent 88%
+    ),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 54%);
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city.layout-future::after {
+  inset: auto 3% 22% 34%;
+  height: 29%;
+  background:
+    linear-gradient(90deg, transparent, rgba(217, 39, 39, 0.28), transparent) 0 68% / 100% 1px no-repeat,
+    linear-gradient(106deg, transparent 0 48%, rgba(217, 39, 39, 0.18) 49% 49.4%, transparent 50%) center / 37% 100% repeat-x,
+    radial-gradient(ellipse at 76% 70%, rgba(238, 98, 93, 0.2), transparent 58%);
+  filter: none;
+  opacity: 0.76;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-brandline {
+  top: 22px;
+  left: 34px;
+  right: 34px;
+  gap: 10px;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-brandmark {
+  width: 30px;
+  height: 30px;
+  color: #ffffff;
+  border: 0;
+  border-radius: 7px;
+  background: linear-gradient(145deg, #e13732, #b91920);
+  box-shadow: 0 6px 15px rgba(169, 25, 32, 0.2);
+  font-family: "Segoe UI", sans-serif;
+  font-size: 13px;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-brandcopy {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-brandname {
+  color: #21191a;
+  font-size: 13px;
+  font-weight: 790;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-brandmeta {
+  color: #9b5c5e;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-status {
+  padding: 5px 9px 5px 19px;
+  color: #8a2025;
+  border: 1px solid rgba(217, 39, 39, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 253, 252, 0.92);
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-status::before {
+  background: var(--cc-future-red);
+  box-shadow: 0 0 0 3px rgba(217, 39, 39, 0.12);
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-copy {
+  width: min(58%, 670px);
+  align-self: center;
+  margin-top: 20px;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-eyebrow {
+  margin-bottom: 11px;
+  color: #a62a2e;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-title {
+  max-width: 720px;
+  color: #171313;
+  font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  font-size: clamp(38px, 4.35cqw, 58px);
+  font-weight: 790;
+  line-height: 1.08;
+  letter-spacing: 0;
+  text-wrap: nowrap;
+  white-space: nowrap;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-future-title-accent,
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city [data-codex-theme-title-accent="true"] {
+  color: var(--cc-future-red);
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-subtitle {
+  max-width: 580px;
+  margin-top: 14px;
+  color: #554849;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.62;
+  text-wrap: pretty;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-badge {
+  margin-top: 18px;
+  padding: 6px 10px;
+  color: #982329;
+  border-color: rgba(217, 39, 39, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 253, 252, 0.86);
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-motif {
+  z-index: 1;
+  top: 8%;
+  right: 7%;
+  width: clamp(150px, 20cqw, 246px);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.72) 0 2%, transparent 2.8%),
+    radial-gradient(circle, rgba(238, 98, 93, 0.16), transparent 64%);
+  box-shadow:
+    0 0 0 22px rgba(255, 255, 255, 0.06),
+    0 0 48px rgba(238, 98, 93, 0.18);
+  opacity: 0.62;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-motif::before {
+  inset: 12%;
+  border: 1px dashed rgba(255, 255, 255, 0.56);
+  box-shadow: inset 0 0 26px rgba(217, 39, 39, 0.12);
+  transform: rotate(16deg);
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-motif::after {
+  inset: -34% 49% -54%;
+  border: 0;
+  border-radius: 0;
+  background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.9) 30%, #ef5c5b 51%, rgba(255, 255, 255, 0.82) 72%, transparent);
+  box-shadow: 0 0 18px rgba(238, 98, 93, 0.34);
+  transform: none;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-companion {
+  display: none;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-cards {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 0;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-card {
+  min-height: 122px;
+  padding: 15px 12px 14px !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 38px auto;
+  place-items: center;
+  align-content: center;
+  gap: 9px;
+  overflow: hidden;
+  color: #241d1e !important;
+  text-align: center;
+  border: 1px solid rgba(213, 74, 72, 0.14) !important;
+  border-radius: 8px !important;
+  background: rgba(255, 253, 252, 0.96) !important;
+  box-shadow: 0 10px 24px rgba(98, 39, 41, 0.1);
+  backdrop-filter: none;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-card:hover {
+  transform: translateY(-2px);
+  color: #241d1e !important;
+  border-color: rgba(217, 39, 39, 0.42) !important;
+  background: #fff8f7 !important;
+  box-shadow: 0 13px 28px rgba(98, 39, 41, 0.14);
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-card:focus-visible {
+  outline: 2px solid rgba(217, 39, 39, 0.68);
+  outline-offset: 2px;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-card-icon {
+  width: 38px;
+  height: 38px;
+  color: var(--cc-future-red);
+  border: 1px solid rgba(217, 39, 39, 0.12);
+  border-radius: 8px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(248, 217, 215, 0.86));
+  box-shadow:
+    0 5px 12px rgba(169, 25, 32, 0.12),
+    inset 0 1px rgba(255, 255, 255, 0.8);
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-card-icon svg {
+  width: 21px;
+  height: 21px;
+  stroke-width: 1.9;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-card-copy {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-card-label {
+  color: #241d1e;
+  font-size: 14px;
+  font-weight: 760;
+  line-height: 1.25;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-card-description {
+  max-width: 100%;
+  margin-top: 0;
+  color: #776667;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.35;
+  -webkit-line-clamp: 1;
+}
+
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-card-arrow,
+html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-card-index {
+  display: none;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-composer {
+  isolation: isolate;
+  overflow: hidden !important;
+  color: var(--cc-future-ink) !important;
+  border: 1px solid rgba(217, 39, 39, 0.19) !important;
+  border-radius: 8px !important;
+  background:
+    linear-gradient(90deg, rgba(217, 39, 39, 0.025), transparent 34%),
+    rgba(255, 253, 252, 0.985) !important;
+  box-shadow:
+    0 14px 34px rgba(82, 22, 25, 0.1),
+    inset 0 1px rgba(255, 255, 255, 0.9) !important;
+  backdrop-filter: none !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-composer::before {
+  content: "";
+  top: 10px;
+  right: 12px;
+  width: 3px;
+  height: 27px;
+  border: 0;
+  border-radius: 2px;
+  background: linear-gradient(180deg, transparent, var(--cc-future-red), transparent);
+  opacity: 0.62;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-composer::after {
+  width: 180px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--cc-future-red));
+  box-shadow: none;
+  opacity: 0.62;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-composer textarea,
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-composer input,
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-composer [contenteditable="true"] {
+  color: var(--cc-future-ink) !important;
+  caret-color: var(--cc-future-red) !important;
+  background: transparent !important;
+  border-color: transparent !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-composer .cc-theme-shell-model-button {
+  color: #514345 !important;
+  border-color: transparent !important;
+  background: transparent !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-composer .cc-theme-shell-attach-button {
+  color: #514345 !important;
+  border-color: transparent !important;
+  background: transparent !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:is(
+  [data-codex-compass-theme-page="home"],
+  [data-codex-compass-theme-page="thread"]
+) .cc-theme-shell-composer .cc-theme-shell-send-button {
+  color: #ffffff !important;
+  border-color: #c82126 !important;
+  background: linear-gradient(145deg, #e13732, #c51f25) !important;
+  box-shadow: 0 7px 16px rgba(169, 25, 32, 0.22) !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:not(
+  [data-codex-compass-theme-page="settings"]
+) :is(
+  [role="menu"],
+  [role="listbox"],
+  [data-slot="popover-content"],
+  [data-slot="dropdown-menu-content"],
+  [data-slot="context-menu-content"],
+  [data-codex-theme-project-context-menu="true"]
+) {
+  color: var(--cc-future-ink) !important;
+  border-color: var(--cc-future-border) !important;
+  background: var(--cc-future-white) !important;
+  box-shadow: 0 18px 48px rgba(82, 22, 25, 0.17) !important;
+  backdrop-filter: none !important;
+  opacity: 1 !important;
+}
+
+html[data-codex-compass-theme="red-future-city"]:not(
+  [data-codex-compass-theme-page="settings"]
+) :is(
+  [role="menuitem"],
+  [role="option"]
+):is(:hover, :focus-visible, [data-highlighted]) {
+  color: var(--cc-future-ink) !important;
+  background: var(--cc-future-rose-mist) !important;
+}
+
+@media (max-width: 920px) {
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase-host {
+    width: calc(100% - 24px) !important;
+    min-height: 570px !important;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city.layout-future {
+    min-height: 570px;
+    grid-template-rows: minmax(274px, 1fr) auto;
+    padding: 30px 22px 20px;
+    background-position: 76% center;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city.layout-future::before {
+    background:
+      linear-gradient(
+        90deg,
+        rgba(255, 253, 252, 0.975) 0%,
+        rgba(255, 253, 252, 0.9) 46%,
+        rgba(255, 250, 249, 0.36) 70%,
+        transparent 92%
+      );
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-brandline {
+    top: 20px;
+    left: 22px;
+    right: 22px;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-copy {
+    width: min(76%, 560px);
+    margin-top: 38px;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-title {
+    font-size: 36px;
+    text-wrap: balance;
+    white-space: normal;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-motif {
+    right: 4%;
+    width: 170px;
+    opacity: 0.44;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-card {
+    min-height: 100px;
+    grid-template-columns: 38px minmax(0, 1fr);
+    grid-template-rows: auto;
+    justify-items: start;
+    padding: 12px !important;
+    text-align: left;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-card-copy {
+    justify-items: start;
+  }
+}
+
+@media (max-width: 620px) {
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase-host {
+    width: calc(100% - 16px) !important;
+    min-height: 622px !important;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city.layout-future {
+    min-height: 622px;
+    grid-template-rows: minmax(292px, 1fr) auto;
+    padding: 26px 16px 16px;
+    background-position: 72% center;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city.layout-future::before {
+    background: rgba(255, 251, 250, 0.84);
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-brandline {
+    top: 16px;
+    left: 16px;
+    right: 16px;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-brandmeta,
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-status {
+    display: none;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-copy {
+    width: 100%;
+    margin-top: 54px;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-title {
+    font-size: 31px;
+    line-height: 1.12;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-subtitle {
+    max-width: 92%;
+    font-size: 12px;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-badge,
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-motif {
+    display: none;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-cards {
+    gap: 8px;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-card {
+    min-height: 94px;
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 8px;
+    padding: 10px !important;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-card-icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-card-label {
+    font-size: 12px;
+  }
+
+  html[data-codex-compass-theme="red-future-city"][data-codex-compass-theme-page="home"] .cc-theme-showcase.theme-red-future-city .cc-theme-showcase-card-description {
+    font-size: 9px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-codex-compass-theme="red-future-city"] .cc-theme-showcase-card,
+  html[data-codex-compass-theme="red-future-city"] .cc-theme-shell-new-task {
+    transition-duration: 0.01ms !important;
+  }
+}

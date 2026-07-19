@@ -1,0 +1,223 @@
+{
+  "schemaVersion": 1,
+  "id": "red-future-city",
+  "version": "1.0.0",
+  "name": "红白科幻",
+  "description": "红白未来城市、巨型能量核心与面向每个人的清洁科技界面。",
+  "source": {
+    "concept": "skin-03-red-white-future",
+    "guides": [
+      "reference-background-prompt-guide.md",
+      "background-generation-prompts.md"
+    ],
+    "assetPolicy": "pure-wallpaper-only"
+  },
+  "appearance": {
+    "mode": "light",
+    "codexAppearance": "light",
+    "windowsControls": "native",
+    "windowControlStrategy": "appearance-sync-only",
+    "taskMode": "banner"
+  },
+  "assets": {
+    "wallpaper": "../red-future-city-wallpaper.webp",
+    "fit": "cover",
+    "positionDesktop": "72% center",
+    "positionCompact": "76% center",
+    "safeArea": "left",
+    "containsUi": false
+  },
+  "copy": {
+    "brand": {
+      "name": "Codex",
+      "meta": "PEOPLE-FIRST AI // FUTURE CITY",
+      "status": "面向每一个人"
+    },
+    "eyebrow": "人民 AI · Codex Compass",
+    "title": {
+      "plainText": "OpenAI 是人民的 AI。",
+      "segments": [
+        {
+          "text": "OpenAI 是",
+          "accent": false
+        },
+        {
+          "text": "人民",
+          "accent": true
+        },
+        {
+          "text": "的 AI。",
+          "accent": false
+        }
+      ]
+    },
+    "subtitle": "用先进的工具，为每一个人创造更多可能。",
+    "composerPlaceholder": "随心输入，Codex 为你构建未来",
+    "cards": [
+      {
+        "id": "build",
+        "icon": "code",
+        "title": "构建",
+        "description": "编写代码与应用",
+        "prompt": "编写代码与应用。请基于当前项目设计并实现一个完整的新功能，完成编码、测试和验证。"
+      },
+      {
+        "id": "analyze",
+        "icon": "review",
+        "title": "分析",
+        "description": "数据分析与洞察",
+        "prompt": "提炼数据与系统洞察。请分析当前项目中最复杂的问题，拆解根因并给出可执行结论。"
+      },
+      {
+        "id": "automate",
+        "icon": "build",
+        "title": "自动化",
+        "description": "智能体与工作流",
+        "prompt": "让智能体接管重复工作。请识别可自动化流程，并实现可靠、可维护的自动化工具。"
+      },
+      {
+        "id": "debug",
+        "icon": "repair",
+        "title": "调试",
+        "description": "修复问题与优化",
+        "prompt": "修复问题并优化性能。请定位当前失败或瓶颈，实施修复并运行完整验证。"
+      }
+    ]
+  },
+  "palette": {
+    "accent": "#d92727",
+    "accentDeep": "#a91920",
+    "coral": "#ee625d",
+    "accentSoft": "#f8d9d7",
+    "background": "#fff8f7",
+    "surface": "#fffdfc",
+    "surfaceAlt": "#fff9f8",
+    "text": "#20191a",
+    "textMuted": "#766767",
+    "border": "#ead1cf"
+  },
+  "layout": {
+    "style": "future",
+    "cardStyle": "solid",
+    "motif": "energy-orbit",
+    "desktop": {
+      "minWidth": 921,
+      "titleFlow": "single-line",
+      "cardColumns": 4,
+      "cardRows": 1,
+      "showEnergyCore": true
+    },
+    "compact": {
+      "maxWidth": 920,
+      "titleFlow": "wrap",
+      "cardColumns": 2,
+      "cardRows": 2,
+      "showEnergyCore": true
+    },
+    "small": {
+      "maxWidth": 620,
+      "cardColumns": 2,
+      "cardRows": 2,
+      "showEnergyCore": false,
+      "hideSecondaryBrandText": true
+    }
+  },
+  "nativeUi": {
+    "preserveNavigation": true,
+    "preserveProjectNames": true,
+    "preserveThreadNames": true,
+    "preserveComposer": true,
+    "preserveMenusAndEvents": true,
+    "syntheticControls": false,
+    "sidebar": {
+      "brandClass": "cc-theme-shell-product-button",
+      "newTaskClass": "cc-theme-shell-new-task",
+      "navigationClass": "cc-theme-shell-nav-row",
+      "projectClass": "cc-theme-shell-project-row",
+      "threadClass": "cc-theme-shell-thread-row",
+      "scrollSelector": "[data-app-action-sidebar-scroll]",
+      "localScrollbars": false
+    },
+    "showcase": {
+      "rootClasses": [
+        "cc-theme-showcase",
+        "theme-red-future-city",
+        "layout-future"
+      ],
+      "brandClass": "cc-theme-showcase-brandline",
+      "titleClass": "cc-theme-showcase-title",
+      "titleAccentClass": "cc-theme-future-title-accent",
+      "cardsClass": "cc-theme-showcase-cards",
+      "cardClass": "cc-theme-showcase-card"
+    },
+    "composer": {
+      "rootClass": "cc-theme-shell-composer",
+      "fillBehavior": "native-input-event"
+    }
+  },
+  "scope": {
+    "rootSelector": "html[data-codex-compass-theme=\"red-future-city\"]",
+    "appPages": [
+      "home",
+      "thread"
+    ],
+    "excludedPages": [
+      "settings"
+    ],
+    "forbiddenTargets": [
+      "[role=\"dialog\"]",
+      "[data-slot=\"dialog-content\"]",
+      "[aria-label=\"图片预览\"]",
+      "[aria-label=\"Image preview\"]",
+      "[data-window-action]",
+      ".cc-theme-shell-window-control"
+    ]
+  },
+  "surfacePolicy": {
+    "opaqueOperationalSurfaces": [
+      "[role=\"menu\"]",
+      "[role=\"listbox\"]",
+      "[data-slot=\"popover-content\"]",
+      "[data-slot=\"dropdown-menu-content\"]",
+      "[data-slot=\"context-menu-content\"]",
+      "[data-codex-theme-project-context-menu=\"true\"]"
+    ],
+    "dialogPolicy": "inherit-runtime-base",
+    "imagePreviewPolicy": "inherit-runtime-base",
+    "settingsPolicy": "excluded"
+  },
+  "acceptanceContract": {
+    "requiredChecks": [
+      "strict-theme-scope",
+      "pure-wallpaper",
+      "desktop-four-card-row",
+      "compact-two-by-two-cards",
+      "horizontal-desktop-title",
+      "native-sidebar-hierarchy",
+      "sidebar-wheel-propagation",
+      "no-local-scrollbars",
+      "native-composer-preserved",
+      "opaque-operational-surfaces",
+      "settings-unmodified",
+      "image-preview-unmodified",
+      "no-window-coordinate-guessing"
+    ],
+    "desktopViewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "compactViewport": {
+      "width": 820,
+      "height": 820
+    },
+    "invariants": {
+      "wallpaperContainsUi": false,
+      "cardCount": 4,
+      "cardLocalScrollbars": 0,
+      "sidebarRowLocalScrollbars": 0,
+      "settingsSelectorMatches": 0,
+      "imagePreviewSelectorMatches": 0,
+      "windowControlCoordinateSelectors": 0
+    }
+  }
+}
