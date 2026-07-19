@@ -1,0 +1,722 @@
+/*
+ * Mint Paper concept slice
+ *
+ * This stylesheet is deliberately scoped to the runtime theme marker. It
+ * decorates Codex-owned nodes only; it does not create or replace navigation,
+ * cards, the composer, menus, dialogs, editors, or image-preview controls.
+ */
+
+html[data-codex-compass-theme="mint-paper"] {
+  color-scheme: light;
+  --mint-paper-ivory: #f7f5eb;
+  --mint-paper-paper: #fffdf7;
+  --mint-paper-paper-alt: #eeeee1;
+  --mint-paper-sage: #7d8e55;
+  --mint-paper-sage-deep: #4f5d34;
+  --mint-paper-olive: #69763f;
+  --mint-paper-moss: #303326;
+  --mint-paper-muted: #727566;
+  --mint-paper-line: #d8d8c3;
+  --mint-paper-gold: #bca56a;
+  --mint-paper-shadow: rgb(62 66 47 / 14%);
+  --cc-theme-accent: var(--mint-paper-sage);
+  --cc-theme-accent-soft: #e4e8cf;
+  --cc-theme-bg: var(--mint-paper-ivory);
+  --cc-theme-surface: var(--mint-paper-paper);
+  --cc-theme-surface-alt: var(--mint-paper-paper-alt);
+  --cc-theme-text: var(--mint-paper-moss);
+  --cc-theme-muted: var(--mint-paper-muted);
+  --cc-theme-border: var(--mint-paper-line);
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-topbar,
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-sessionbar {
+  color: var(--mint-paper-moss) !important;
+  border-color: var(--mint-paper-line) !important;
+  background-color: #fffdf8 !important;
+  background-image:
+    linear-gradient(90deg, rgb(125 142 85 / 7%), transparent 36%),
+    repeating-linear-gradient(0deg, rgb(83 91 61 / 2%) 0 1px, transparent 1px 4px) !important;
+  backdrop-filter: none !important;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-topbar::after {
+  color: var(--mint-paper-sage-deep);
+  border-color: rgb(125 142 85 / 28%);
+  background-color: #fffdf8;
+  background-image: radial-gradient(circle at 10px 50%, var(--mint-paper-sage) 0 3px, transparent 3.5px);
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-window-control {
+  color: #20231a !important;
+  background: transparent !important;
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-window-control svg,
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-window-control path,
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-window-control span {
+  color: currentColor !important;
+  stroke: currentColor !important;
+  opacity: 1 !important;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-window-minimize:hover,
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-window-maximize:hover {
+  color: #1e2415 !important;
+  background: #e8ebd9 !important;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-window-close:hover {
+  color: #ffffff !important;
+  background: #c83232 !important;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-sidebar {
+  --sidebar-footer-height: 58px;
+  color: var(--mint-paper-moss) !important;
+  border-right: 1px solid rgb(125 142 85 / 24%) !important;
+  background-color: #fbf9ef !important;
+  background-image:
+    linear-gradient(180deg, rgb(255 255 255 / 56%), transparent 34%),
+    repeating-linear-gradient(0deg, rgb(83 91 61 / 2.4%) 0 1px, transparent 1px 4px) !important;
+  box-shadow: 10px 0 30px rgb(62 66 47 / 8%);
+  backdrop-filter: none !important;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-sidebar::before {
+  inset: 0;
+  background:
+    radial-gradient(ellipse 54px 130px at -12px 24%, rgb(103 118 69 / 12%) 0 42%, transparent 70%),
+    radial-gradient(ellipse 38px 92px at 104% 72%, rgb(125 142 85 / 10%) 0 46%, transparent 72%),
+    linear-gradient(135deg, rgb(228 232 207 / 34%), transparent 38%);
+  opacity: 1;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-sidebar::after {
+  top: 96px;
+  width: 1px;
+  height: min(210px, 26vh);
+  background: linear-gradient(180deg, transparent, rgb(125 142 85 / 48%), transparent);
+  opacity: 1;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-product-button {
+  min-height: 54px !important;
+  color: var(--mint-paper-moss) !important;
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-family: Georgia, "Noto Serif SC", "Microsoft YaHei", serif !important;
+  font-size: 24px !important;
+  font-weight: 650 !important;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-product-button::before {
+  color: var(--mint-paper-olive);
+  border-color: rgb(125 142 85 / 26%);
+  border-radius: 50% 50% 46% 54%;
+  background: #eef0df;
+  box-shadow: 0 4px 12px rgb(78 88 49 / 10%);
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-product-button::after {
+  color: var(--mint-paper-muted);
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-search-button {
+  color: var(--mint-paper-olive) !important;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-new-task {
+  color: #ffffff !important;
+  border-color: #718047 !important;
+  background: linear-gradient(135deg, #8e9c64, #68763f) !important;
+  box-shadow: 0 8px 18px rgb(83 96 48 / 18%) !important;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-nav-row,
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-project-row,
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-thread-row {
+  min-width: 0 !important;
+  overflow-x: clip !important;
+  overflow-y: clip !important;
+  overscroll-behavior: none;
+  scrollbar-width: none;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-project-row::-webkit-scrollbar,
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-thread-row::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-project-row,
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-thread-row {
+  flex: 0 0 auto !important;
+  border: 1px solid transparent !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-project-row:hover,
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-thread-row:hover {
+  color: #3f4b2c !important;
+  border-color: rgb(125 142 85 / 20%) !important;
+  background: #f0f1e4 !important;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-active-row {
+  color: #354026 !important;
+  border-color: rgb(125 142 85 / 26%) !important;
+  background: #e9ecd9 !important;
+  box-shadow: inset 3px 0 0 var(--mint-paper-sage) !important;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-project-row button,
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-project-row [role="button"],
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-thread-row button,
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-thread-row [role="button"] {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-sidebar [data-app-action-sidebar-scroll] {
+  min-height: 0;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-color: rgb(125 142 85 / 42%) transparent;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-group-heading {
+  color: var(--mint-paper-olive) !important;
+  border-top-color: rgb(125 142 85 / 18%) !important;
+  font-family: "Noto Serif SC", "Microsoft YaHei", serif !important;
+  font-size: 10px !important;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-account-row {
+  color: var(--mint-paper-moss) !important;
+  border-color: rgb(125 142 85 / 20%) !important;
+  background: #f1f1e4 !important;
+  box-shadow: inset 0 1px rgb(255 255 255 / 66%) !important;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper.layout-paper {
+  min-height: 570px;
+  grid-template-rows: minmax(320px, 1fr) auto;
+  gap: 0;
+  padding: 50px 34px 26px;
+  overflow: hidden;
+  color: var(--mint-paper-moss);
+  border: 1px solid rgb(125 142 85 / 34%);
+  border-radius: 8px;
+  background-color: var(--mint-paper-ivory);
+  background-position: 82% center;
+  box-shadow:
+    0 22px 50px var(--mint-paper-shadow),
+    inset 0 0 0 1px rgb(255 255 255 / 62%);
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper.layout-paper::before {
+  background:
+    linear-gradient(90deg,
+      rgb(250 248 238 / 98%) 0%,
+      rgb(250 248 238 / 96%) 38%,
+      rgb(250 248 238 / 76%) 54%,
+      rgb(250 248 238 / 18%) 73%,
+      transparent 92%),
+    repeating-linear-gradient(0deg, rgb(79 86 56 / 2.2%) 0 1px, transparent 1px 4px);
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper.layout-paper::after {
+  inset: 0;
+  height: auto;
+  background:
+    radial-gradient(ellipse 82px 190px at 98% 18%, rgb(86 100 54 / 16%) 0 33%, transparent 66%),
+    radial-gradient(ellipse 62px 150px at 93% 78%, rgb(105 118 63 / 12%) 0 34%, transparent 68%),
+    radial-gradient(ellipse 46px 116px at 2% 58%, rgb(125 142 85 / 7%) 0 34%, transparent 70%);
+  filter: blur(6px);
+  opacity: 1;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-brandline {
+  top: 16px;
+  left: 22px;
+  right: 22px;
+  gap: 10px;
+  pointer-events: none;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-brandline::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: 50%;
+  left: min(280px, 34%);
+  right: min(168px, 21%);
+  border-top: 1px dashed rgb(125 142 85 / 32%);
+  transform: translateY(-50%);
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-brandmark {
+  width: 31px;
+  height: 31px;
+  color: var(--mint-paper-olive);
+  border-color: rgb(125 142 85 / 28%);
+  border-radius: 50% 50% 44% 56%;
+  background: #f0f1e3;
+  box-shadow: 0 5px 13px rgb(75 83 49 / 10%);
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-brandname {
+  color: #3b432d;
+  font-family: "Noto Serif SC", "Microsoft YaHei", serif;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-brandmeta {
+  color: var(--mint-paper-muted);
+  font-size: 9px;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-status {
+  color: var(--mint-paper-sage-deep);
+  border-color: rgb(125 142 85 / 28%);
+  background: #fffdf8;
+  box-shadow: 0 4px 12px rgb(70 78 46 / 8%);
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-status::before {
+  background: var(--mint-paper-sage);
+  box-shadow: 0 0 0 3px rgb(125 142 85 / 16%);
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-copy {
+  width: min(54%, 590px);
+  align-self: start;
+  margin-top: 96px;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-eyebrow {
+  width: fit-content;
+  margin-bottom: 18px;
+  padding: 0 0 7px;
+  color: var(--mint-paper-olive);
+  border-bottom: 1px solid rgb(125 142 85 / 30%);
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-title {
+  max-width: none;
+  color: #2f3524;
+  font-family: Georgia, "Noto Serif SC", "STKaiti", "Microsoft YaHei", serif;
+  font-size: 42px;
+  font-weight: 650;
+  line-height: 1.16;
+  letter-spacing: 0;
+  text-wrap: nowrap;
+  white-space: nowrap;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-subtitle {
+  max-width: 520px;
+  margin-top: 14px;
+  color: #686c5c;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-badge {
+  margin-top: 16px;
+  color: var(--mint-paper-sage-deep);
+  border-color: rgb(125 142 85 / 28%);
+  border-radius: 6px;
+  background: #f6f5e9;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-motif {
+  top: 5%;
+  right: 2.4%;
+  width: 168px;
+  aspect-ratio: 1.2;
+  border: 0;
+  border-radius: 0;
+  opacity: 1;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-motif::before {
+  content: "";
+  position: absolute;
+  inset: 18px 14px auto auto;
+  width: 74px;
+  height: 52px;
+  border: 0;
+  border-radius: 0;
+  background:
+    linear-gradient(145deg, rgb(255 255 255 / 72%), transparent 48%),
+    linear-gradient(28deg, #d7dbc0, #f6f4e7 52%, #aeb78b);
+  clip-path: polygon(0 54%, 33% 36%, 44% 0, 53% 35%, 100% 13%, 68% 56%, 85% 100%, 48% 72%, 24% 96%);
+  filter: drop-shadow(0 4px 5px rgb(70 77 48 / 14%));
+  transform: rotate(-8deg);
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-motif::after {
+  content: "✦  ·  ✧";
+  position: absolute;
+  inset: auto 12px 16px auto;
+  color: var(--mint-paper-gold);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 17px;
+  line-height: 1;
+  letter-spacing: 8px;
+  transform: none;
+  opacity: .78;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-companion {
+  right: 20px;
+  bottom: 156px;
+  width: 104px;
+  min-height: 68px;
+  color: var(--mint-paper-moss);
+  border-color: rgb(125 142 85 / 30%);
+  border-radius: 4px;
+  background-color: #fffdf7;
+  box-shadow:
+    0 11px 23px rgb(65 70 45 / 15%),
+    5px 5px 0 rgb(228 232 207 / 68%);
+  transform: rotate(-2deg);
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-companion-mark {
+  color: #ffffff;
+  border-radius: 4px;
+  background: var(--mint-paper-sage);
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-companion-label {
+  color: var(--mint-paper-moss);
+  background: #fffdf8;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-cards {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: -58px;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card {
+  min-width: 0;
+  min-height: 140px;
+  padding: 16px 12px 24px !important;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 52px minmax(0, auto);
+  justify-items: center;
+  align-content: center;
+  gap: 10px;
+  overflow-x: clip !important;
+  overflow-y: clip !important;
+  overscroll-behavior: none;
+  color: #343827 !important;
+  text-align: center;
+  border: 1px solid rgb(125 142 85 / 26%) !important;
+  border-radius: 8px !important;
+  background-color: #fffdf8 !important;
+  background-image:
+    linear-gradient(180deg, rgb(255 255 255 / 68%), transparent 52%),
+    repeating-linear-gradient(0deg, rgb(83 91 61 / 2%) 0 1px, transparent 1px 4px) !important;
+  box-shadow:
+    0 10px 22px rgb(66 72 45 / 13%),
+    inset 0 0 0 1px rgb(255 255 255 / 68%);
+  backdrop-filter: none !important;
+  scrollbar-width: none;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card::after {
+  content: "♥";
+  position: absolute;
+  left: 50%;
+  bottom: 7px;
+  pointer-events: none;
+  color: rgb(125 142 85 / 62%);
+  font-size: 12px;
+  line-height: 1;
+  transform: translateX(-50%);
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card:hover {
+  color: #29301d !important;
+  border-color: rgb(105 118 63 / 58%) !important;
+  background-color: #f5f5e8 !important;
+  background-image:
+    linear-gradient(180deg, rgb(255 255 255 / 62%), transparent 58%),
+    repeating-linear-gradient(0deg, rgb(83 91 61 / 2%) 0 1px, transparent 1px 4px) !important;
+  transform: translateY(-2px);
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card:focus-visible {
+  outline: 2px solid rgb(105 118 63 / 78%);
+  outline-offset: 2px;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card-icon {
+  width: 46px;
+  height: 46px;
+  color: #fdfcf4;
+  background: linear-gradient(145deg, #9ba777, #6f7d48);
+  box-shadow:
+    0 0 0 6px rgb(228 232 207 / 54%),
+    0 6px 13px rgb(81 92 50 / 16%);
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card-icon svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 1.8;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card-copy {
+  min-width: 0;
+  align-self: start;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card-label {
+  display: -webkit-box;
+  min-height: 42px;
+  overflow: hidden;
+  color: #343827;
+  font-family: "Noto Serif SC", "Microsoft YaHei", serif;
+  font-size: 14px;
+  font-weight: 680;
+  line-height: 1.5;
+  text-align: center;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card-description,
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card-index,
+html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card-arrow {
+  display: none;
+}
+
+html[data-codex-compass-theme="mint-paper"][data-codex-compass-showcase="mint-paper"] .cc-theme-showcase-composer,
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-composer {
+  position: relative !important;
+  overflow: hidden !important;
+  color: var(--mint-paper-moss) !important;
+  border: 1px solid rgb(105 118 63 / 42%) !important;
+  border-radius: 8px !important;
+  background-color: #fffdf8 !important;
+  background-image:
+    linear-gradient(180deg, rgb(255 255 255 / 72%), transparent 62%),
+    repeating-linear-gradient(0deg, rgb(83 91 61 / 2%) 0 1px, transparent 1px 4px) !important;
+  box-shadow:
+    0 14px 30px rgb(62 66 47 / 14%),
+    inset 0 0 0 1px rgb(255 255 255 / 72%) !important;
+  backdrop-filter: none !important;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-composer::before {
+  color: var(--mint-paper-olive);
+  border-color: rgb(125 142 85 / 22%);
+  border-radius: 50% 50% 44% 56%;
+  background: #eef0df;
+  opacity: .84;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-composer::after {
+  right: 54px;
+  bottom: 8px;
+  width: 178px;
+  height: 28px;
+  border-top: 1px dashed rgb(125 142 85 / 26%);
+  background:
+    radial-gradient(circle at 94% 1px, var(--mint-paper-gold) 0 2px, transparent 2.5px),
+    radial-gradient(circle at 72% 1px, rgb(125 142 85 / 50%) 0 1.5px, transparent 2px);
+  opacity: .78;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-composer textarea,
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-composer input,
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-composer [contenteditable="true"] {
+  color: var(--mint-paper-moss) !important;
+  caret-color: var(--mint-paper-olive);
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-composer .cc-theme-shell-model-button {
+  color: var(--mint-paper-sage-deep) !important;
+  border-color: rgb(125 142 85 / 26%) !important;
+  background: #f2f2e5 !important;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-composer .cc-theme-shell-attach-button {
+  color: var(--mint-paper-sage-deep) !important;
+  border-color: rgb(125 142 85 / 24%) !important;
+  background: #f0f1e3 !important;
+}
+
+html[data-codex-compass-theme="mint-paper"] .cc-theme-shell-composer .cc-theme-shell-send-button {
+  color: #ffffff !important;
+  border-color: #68763f !important;
+  background: #74834a !important;
+  box-shadow: 0 6px 14px rgb(76 88 43 / 24%) !important;
+}
+
+@media (max-width: 980px) {
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper.layout-paper {
+    min-height: 650px;
+    grid-template-rows: minmax(300px, 1fr) auto;
+    padding: 46px 22px 22px;
+    background-position: 72% center;
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper.layout-paper::before {
+    background:
+      linear-gradient(90deg,
+        rgb(250 248 238 / 98%) 0%,
+        rgb(250 248 238 / 94%) 48%,
+        rgb(250 248 238 / 48%) 72%,
+        transparent 100%),
+      repeating-linear-gradient(0deg, rgb(79 86 56 / 2.2%) 0 1px, transparent 1px 4px);
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-copy {
+    width: min(66%, 500px);
+    margin-top: 78px;
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-title {
+    font-size: 34px;
+    text-wrap: balance;
+    white-space: normal;
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-top: -22px;
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card {
+    min-height: 112px;
+    grid-template-columns: 46px minmax(0, 1fr);
+    grid-template-rows: auto;
+    justify-items: stretch;
+    align-items: center;
+    padding: 14px 14px 14px !important;
+    text-align: left;
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card::after {
+    left: auto;
+    right: 10px;
+    bottom: 9px;
+    transform: none;
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card-label {
+    min-height: 0;
+    text-align: left;
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-companion {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper.layout-paper {
+    min-height: 690px;
+    grid-template-rows: minmax(280px, 1fr) auto;
+    padding: 44px 16px 18px;
+    background-position: 76% center;
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper.layout-paper::before {
+    background:
+      linear-gradient(90deg, rgb(250 248 238 / 91%), rgb(250 248 238 / 78%)),
+      repeating-linear-gradient(0deg, rgb(79 86 56 / 2.2%) 0 1px, transparent 1px 4px);
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-brandline {
+    left: 14px;
+    right: 14px;
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-brandline::after,
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-status {
+    display: none;
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-copy {
+    width: 100%;
+    margin-top: 62px;
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-title {
+    font-size: 29px;
+    line-height: 1.2;
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-subtitle {
+    max-width: 86%;
+    font-size: 13px;
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-motif {
+    right: -18px;
+    width: 132px;
+    opacity: .62;
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-cards {
+    gap: 8px;
+    margin-top: 0;
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card {
+    min-height: 105px;
+    grid-template-columns: 38px minmax(0, 1fr);
+    gap: 8px;
+    padding: 11px 9px !important;
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card-icon {
+    width: 36px;
+    height: 36px;
+    box-shadow: 0 0 0 4px rgb(228 232 207 / 48%);
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card-label {
+    font-size: 12px;
+    line-height: 1.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-codex-compass-theme="mint-paper"] .cc-theme-showcase.theme-mint-paper .cc-theme-showcase-card {
+    transition-duration: .01ms !important;
+  }
+}

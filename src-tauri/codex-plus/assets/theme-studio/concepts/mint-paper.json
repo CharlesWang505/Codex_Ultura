@@ -1,0 +1,337 @@
+{
+  "schemaVersion": 1,
+  "themeId": "mint-paper",
+  "displayName": "清透定制",
+  "implementationStatus": "independent-concept-slice",
+  "sourceConcept": {
+    "direction": "暖白手工纸上的清透生活方式编辑主题",
+    "referenceRole": "概念图只提供色板、空间层级、人物大致位置和装饰语言，不作为可擦除 UI 的底图",
+    "promptDocuments": [
+      "reference-background-prompt-guide.md",
+      "background-generation-prompts.md"
+    ],
+    "nonGoals": [
+      "不复制概念图中的窗口、菜单、侧栏、卡片、输入框或任何可读文字",
+      "不在壁纸中烘焙品牌栏、标题、快捷卡、项目树、composer 或按钮",
+      "不写入或暗示任何真实人物姓名、艺名、签名、身份编号或品牌背书"
+    ]
+  },
+  "runtimeBinding": {
+    "builtinThemeId": "mint-paper",
+    "layoutStyle": "paper",
+    "cardStyle": "paper",
+    "motifStyle": "leaves",
+    "stylesheet": "mint-paper.css",
+    "wallpaperAsset": "../sage-paper-wallpaper.webp",
+    "rootSelector": "html[data-codex-compass-theme=\"mint-paper\"]",
+    "showcaseSelector": ".cc-theme-showcase.theme-mint-paper.layout-paper",
+    "nativeComposerSelector": ".cc-theme-showcase-composer[data-codex-theme-native-composer=\"true\"], .cc-theme-shell-composer",
+    "appearance": {
+      "requiredMode": "light",
+      "cssColorScheme": "light",
+      "runtimeAction": {
+        "type": "app.appearance.set_mode",
+        "mode": "light"
+      },
+      "reason": "主题背景亮度高，Codex 外观和 Windows DWM 沉浸式明暗状态必须保持浅色契约，使最小化、最大化和关闭符号使用深色前景",
+      "windowControlMinimumContrast": 7
+    }
+  },
+  "visualSystem": {
+    "palette": {
+      "warmIvory": "#f7f5eb",
+      "paperWhite": "#fffdf7",
+      "paperAlt": "#eeeee1",
+      "sage": "#7d8e55",
+      "deepSage": "#4f5d34",
+      "olive": "#69763f",
+      "mossInk": "#303326",
+      "mutedInk": "#727566",
+      "paperLine": "#d8d8c3",
+      "champagneGold": "#bca56a"
+    },
+    "materials": [
+      "暖白手工纸纤维",
+      "低对比洗水亚麻",
+      "哑光鼠尾草针织",
+      "半透明橄榄叶与桉树叶",
+      "暖白折纸",
+      "稀疏香槟金尘点"
+    ],
+    "typography": {
+      "brand": "Georgia / Noto Serif SC / Microsoft YaHei",
+      "headline": "Georgia / Noto Serif SC / STKaiti / Microsoft YaHei",
+      "ui": "沿用 Codex 原生字体，主题仅调整现有品牌栏、标题和快捷卡字重",
+      "desktopHeadlinePx": 42,
+      "compactHeadlinePx": 34,
+      "narrowHeadlinePx": 29,
+      "letterSpacing": 0,
+      "desktopTitleContract": "单行横向标题",
+      "compactTitleContract": "允许自然换行，禁止与人物或卡片重叠"
+    },
+    "shape": {
+      "panelRadiusPx": 8,
+      "cardRadiusPx": 8,
+      "composerRadiusPx": 8,
+      "lineWeightPx": 1,
+      "shadowCharacter": "低扩散、低透明度、暖灰绿色纸面投影"
+    }
+  },
+  "wallpaperContract": {
+    "assetType": "opaque-edge-to-edge-wallpaper",
+    "targetSize": {
+      "width": 2560,
+      "height": 1440,
+      "aspectRatio": "16:9"
+    },
+    "subject": {
+      "identityMode": "original-fictional-adult",
+      "presentation": "adult-male",
+      "description": "原创虚构成年男性，短黑发、自然清洁造型、平静目光，一只手轻托脸侧，穿浅鼠尾草灰针织开衫与暖白内搭",
+      "forbiddenIdentityBehavior": [
+        "不得根据概念图推断真实身份",
+        "不得使用真实人物姓名或可识别签名",
+        "不得模仿名人、公众人物、私人个体或受版权保护角色",
+        "不得出现未成年或年龄模糊的外观"
+      ]
+    },
+    "composition": {
+      "nativeContentSafeZone": "x=0%-52%",
+      "continuousTransitionZone": "x=45%-62%",
+      "subjectSafeZone": "x=62%-88%, y=16%-72%",
+      "faceSafeZone": "y=20%-52%",
+      "handSafeZone": "y=30%-70%",
+      "edgeInset": "所有关键细节距任一边缘至少 8%",
+      "focus": {
+        "x": 0.72,
+        "y": 0.45
+      },
+      "safeArea": "left",
+      "leftSide": "暖象牙负空间、极淡鼠尾草洗色与一处外缘植物影，不出现脸、手、强光斑或密集叶片",
+      "rightSide": "人物、叶影、折纸与较高频材质集中于右侧，保持与左侧为同一连续工作室",
+      "cropRule": "16:9、16:10、4:3 与超宽 cover 裁切后，脸、手、头顶和主要衣物仍完整"
+    },
+    "lighting": "左上方阴天窗光，柔和自然阴影，低饱和、轻模拟胶片颗粒",
+    "decorativeSourceOnly": [
+      "叶片与纸面纹理可以存在于壁纸",
+      "可读文字、签名、印章、标签、票据、拍立得和 UI 几何必须由真实界面或可控装饰层承担"
+    ]
+  },
+  "uiComposition": {
+    "nativeUiOnly": true,
+    "brandBar": {
+      "selector": ".cc-theme-showcase-brandline",
+      "ownership": "Codex runtime DOM",
+      "layout": "左侧叶形品牌标记、双行品牌信息、横向虚线、右侧状态胶囊",
+      "decorations": "虚线和叶形外观仅由 CSS 伪元素绘制，pointer-events 为 none"
+    },
+    "headline": {
+      "selector": ".cc-theme-showcase-copy",
+      "titleSelector": ".cc-theme-showcase-title",
+      "subtitleSelector": ".cc-theme-showcase-subtitle",
+      "ownership": "Codex runtime DOM",
+      "desktop": "标题保持一行，位于人物左侧的低信息区",
+      "compact": "标题可换行，宽度增至 66%",
+      "narrow": "标题使用全宽，人物只作为低透明度背景层"
+    },
+    "quickCards": {
+      "containerSelector": ".cc-theme-showcase-cards",
+      "cardSelector": ".cc-theme-showcase-card",
+      "ownership": "四个真实 button",
+      "requiredCount": 4,
+      "desktopColumns": 4,
+      "compactColumns": 2,
+      "content": [
+        "探索并理解代码",
+        "构建新功能、应用或工具",
+        "审查代码并提出修改建议",
+        "修复问题和失败"
+      ],
+      "behavior": "点击沿用运行时 fillComposer，将对应 prompt 写入原生 composer",
+      "visual": "暖白纸卡、橄榄圆形图标、底部小心形装饰，描述、序号与箭头在本概念中隐藏但按钮语义和事件保持不变",
+      "scrollContract": "每张卡 overflow 为 clip，禁止横向或纵向内部滚动条"
+    },
+    "sidebar": {
+      "selector": ".cc-theme-shell-sidebar",
+      "ownership": "Codex 原生导航、项目和任务 DOM",
+      "style": "暖白纸面、淡叶影、橄榄选中条、克制分组线",
+      "rowSelectors": [
+        ".cc-theme-shell-project-row",
+        ".cc-theme-shell-thread-row"
+      ],
+      "scrollOwner": "[data-app-action-sidebar-scroll]",
+      "rowOverflow": "clip",
+      "wheelBehavior": "运行时 forwardSidebarRowWheel 将项目或任务行上的滚轮增量交给主侧栏滚动容器，行自身 scrollTop 必须保持 0"
+    },
+    "composer": {
+      "selector": ".cc-theme-showcase-composer[data-codex-theme-native-composer=\"true\"], .cc-theme-shell-composer",
+      "ownership": "Codex 原生 composer",
+      "style": "暖白纸面、鼠尾草描边、右下虚线与星点，附件、模型和发送按钮保留原生事件",
+      "inputContract": "输入框透明仅限 composer 内部，外层背景必须完全不透明",
+      "interactionContract": "不覆盖 textarea、contenteditable、附件、模型、发送或停止按钮的 pointer-events"
+    }
+  },
+  "decorations": [
+    {
+      "id": "paper-fiber",
+      "owner": ".cc-theme-showcase.theme-mint-paper.layout-paper::before",
+      "method": "repeating-linear-gradient",
+      "purpose": "提供克制的手工纸纤维，不形成伪面板",
+      "pointerEvents": "none"
+    },
+    {
+      "id": "leaf-shadows",
+      "owner": ".cc-theme-showcase.theme-mint-paper.layout-paper::after",
+      "method": "blurred radial gradients",
+      "purpose": "在右上、右下和最左外缘形成低对比叶影",
+      "pointerEvents": "none"
+    },
+    {
+      "id": "paper-crane",
+      "owner": ".cc-theme-showcase-motif::before",
+      "method": "CSS polygon with paper gradients",
+      "purpose": "右上角暖白折纸鹤，可随断点缩放",
+      "pointerEvents": "none"
+    },
+    {
+      "id": "star-points",
+      "owner": ".cc-theme-showcase-motif::after",
+      "method": "text glyph decoration",
+      "purpose": "稀疏香槟金星点，不承担可读信息",
+      "pointerEvents": "none"
+    },
+    {
+      "id": "stitched-brand-line",
+      "owner": ".cc-theme-showcase-brandline::after",
+      "method": "dashed border",
+      "purpose": "连接品牌信息与状态胶囊的横向纸笺虚线",
+      "pointerEvents": "none"
+    },
+    {
+      "id": "composer-thread",
+      "owner": ".cc-theme-shell-composer::after",
+      "method": "dashed border and radial points",
+      "purpose": "composer 右下角虚线与星点，不遮挡原生按钮",
+      "pointerEvents": "none"
+    }
+  ],
+  "scopeContract": {
+    "requiredPrefix": "html[data-codex-compass-theme=\"mint-paper\"]",
+    "allowedRuntimeSurfaces": [
+      ".cc-theme-shell-topbar",
+      ".cc-theme-shell-sessionbar",
+      ".cc-theme-shell-window-control",
+      ".cc-theme-shell-sidebar",
+      ".cc-theme-shell-product-button",
+      ".cc-theme-shell-search-button",
+      ".cc-theme-shell-new-task",
+      ".cc-theme-shell-nav-row",
+      ".cc-theme-shell-project-row",
+      ".cc-theme-shell-thread-row",
+      ".cc-theme-shell-active-row",
+      ".cc-theme-shell-group-heading",
+      ".cc-theme-shell-account-row",
+      ".cc-theme-showcase.theme-mint-paper.layout-paper",
+      ".cc-theme-showcase-brandline",
+      ".cc-theme-showcase-copy",
+      ".cc-theme-showcase-title",
+      ".cc-theme-showcase-subtitle",
+      ".cc-theme-showcase-badge",
+      ".cc-theme-showcase-motif",
+      ".cc-theme-showcase-companion",
+      ".cc-theme-showcase-cards",
+      ".cc-theme-showcase-card",
+      ".cc-theme-showcase-composer",
+      ".cc-theme-shell-composer"
+    ],
+    "forbiddenBroadTargets": [
+      "aside",
+      "nav",
+      "main",
+      "button",
+      "[role=\"dialog\"]",
+      "[role=\"menu\"]",
+      "[role=\"listbox\"]",
+      "[data-slot=\"dialog-content\"]",
+      "[data-slot=\"popover-content\"]",
+      "pre",
+      "code",
+      ".monaco-editor",
+      "[data-testid*=\"diff\"]",
+      "[data-testid*=\"terminal\"]",
+      "[aria-label=\"图片预览\"]"
+    ],
+    "mutationContract": "此切片没有脚本和 MutationObserver，不增加类名写入；完全依赖现有幂等运行时标记",
+    "eventContract": "此切片不注册、代理或取消任何 click、wheel、keyboard、download 或 dialog 事件",
+    "transparencyContract": "只允许 showcase 的图片叠层和 composer 内部输入框透明；设置、菜单、弹窗、代码块、Diff、终端、Monaco、图片预览按钮必须继续使用运行时的不透明操作表面"
+  },
+  "responsiveContract": {
+    "desktop": {
+      "minimumWidth": 981,
+      "titleWhiteSpace": "nowrap",
+      "cards": "4 columns",
+      "showcaseMinimumHeightPx": 570
+    },
+    "compact": {
+      "range": "641-980",
+      "titleWhiteSpace": "normal",
+      "cards": "2 by 2",
+      "showcaseMinimumHeightPx": 650
+    },
+    "narrow": {
+      "maximumWidth": 640,
+      "titleWhiteSpace": "normal",
+      "cards": "2 by 2",
+      "showcaseMinimumHeightPx": 690,
+      "status": "hidden",
+      "companion": "hidden"
+    },
+    "layoutInvariants": [
+      "showcase 不与 composer 重叠",
+      "页面无横向溢出",
+      "四张卡尺寸稳定且不会因动态文字改变网格轨道",
+      "任何项目行、任务行或快捷卡都不产生独立滚动条"
+    ]
+  },
+  "qa": {
+    "testFile": "tests/theme-concepts/mint-paper.test.mjs",
+    "viewports": [
+      {
+        "name": "desktop",
+        "width": 1440,
+        "height": 900
+      },
+      {
+        "name": "compact",
+        "width": 900,
+        "height": 820
+      }
+    ],
+    "requiredAssertions": [
+      "所有 CSSStyleRule 都包含 mint-paper 根作用域",
+      "CSS 不直接选择设置、菜单、弹窗、代码块、Diff、终端、Monaco 或图片预览",
+      "浅色 color-scheme 与 app.appearance.set_mode light 契约一致",
+      "三个窗口控件前景与顶栏背景对比度至少 7:1",
+      "桌面标题保持一行且快捷卡为四列",
+      "紧凑宽度标题可换行且快捷卡为 2x2",
+      "四个快捷卡均为真实 button，点击后写入原生 composer",
+      "项目/任务行和快捷卡 overflow 为 clip 且 scrollTop 保持 0",
+      "项目行上的滚轮交给侧栏主滚动容器",
+      "设置、菜单、listbox、popover、代码块和图片预览操作按钮保持不透明、可点击和可读",
+      "图片预览容器维持原生全屏透明画布，下载与关闭按钮不被本主题改写",
+      "桌面与紧凑视口均无横向溢出，showcase 位于 composer 上方"
+    ],
+    "manualFollowUp": [
+      "集成到 theme_studio.rs 后，在真实 Codex 新任务页对照概念图检查人物裁切、标题位置和四卡纵向节奏",
+      "重启 Codex 后确认浅色外观同步仍会重新下发，Windows 原生标题栏按钮可见",
+      "依次打开设置、模型菜单、附件菜单、项目归档/移除/重命名、代码块、Diff、终端和图片预览",
+      "在 16:9、16:10、4:3、超宽和高 DPI 下检查壁纸 crop-safe 区域"
+    ]
+  },
+  "knownIntegrationRisk": [
+    "该文件是独立切片，尚未由 theme_studio.rs include 或拼接；主分支集成时必须显式加载 CSS 与 JSON",
+    "真实 Codex DOM 类名依赖当前运行时装饰器；若上游类名变化，应先更新测试夹具再调整选择器",
+    "Windows 原生 DWM 按钮颜色最终由现有 appearance 同步和宿主实现控制，CSS 只覆盖可识别的网页标题栏控件",
+    "现有 sage-paper-wallpaper.webp 必须继续经过权利与分发审查；本切片不声明任何肖像或素材授权"
+  ]
+}
