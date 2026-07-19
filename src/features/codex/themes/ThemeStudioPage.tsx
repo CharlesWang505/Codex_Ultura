@@ -1,24 +1,40 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
+  ArrowRight,
   Blocks,
+  CalendarDays,
   Check,
+  CircleCheck,
+  CirclePlus,
   CircleAlert,
   Code2,
   Copy,
+  Download,
+  ExternalLink,
+  FolderOpen,
+  GitPullRequest,
+  Globe2,
   Image,
+  Info,
   Import,
   ListChecks,
   LoaderCircle,
+  MessageCircle,
   MonitorCog,
   Palette,
   Power,
   RefreshCw,
   RotateCcw,
   Save,
+  Search,
+  Settings,
   Sparkles,
+  Store,
   Trash2,
   Upload,
+  UserRound,
   Wrench,
+  Zap,
 } from 'lucide-react'
 import { callCodex } from '../api'
 import { CodexNotice } from '../shared/CodexNotice'
@@ -30,6 +46,7 @@ import type {
   ThemeShowcase,
   ThemeShowcaseCard,
   ThemeShowcaseCardIcon,
+  ThemeMarketResult,
   ThemeStudioResult,
   ThemeStudioSettings,
   ThemeVisual,
@@ -105,8 +122,8 @@ const presentationDefaults: Record<string, ThemePresentation> = {
     heroPosition: 'right', overlayStrength: 86, taskWallpaperOpacity: 8, taskMode: 'banner',
   },
   'enfp-doodle': {
-    layoutStyle: 'doodle', cardStyle: 'outline', motifStyle: 'doodles', headerBadge: 'ENERGY 100%',
-    heroPosition: 'far-right', overlayStrength: 84, taskWallpaperOpacity: 6, taskMode: 'ambient',
+    layoutStyle: 'doodle', cardStyle: 'outline', motifStyle: 'doodles', headerBadge: '好点子 +99',
+    heroPosition: 'far-right', overlayStrength: 88, taskWallpaperOpacity: 5, taskMode: 'ambient',
   },
   'cyan-virtual-stage': {
     layoutStyle: 'idol', cardStyle: 'glass', motifStyle: 'stars', headerBadge: '未来舞台',
@@ -146,6 +163,19 @@ function presentationFor(theme: Pick<ThemeDefinition, 'id'>): ThemePresentation 
   return structuredClone(presentationDefaults[theme.id] ?? fallbackPresentation)
 }
 
+function summarizeShowcasePrompt(prompt: string) {
+  const firstClause = prompt.trim().split(/[。！？!?；;]/, 1)[0] ?? ''
+  return firstClause.length > 24 ? `${firstClause.slice(0, 23)}…` : firstClause
+}
+
+function splitEnfpBrand(value: string) {
+  const [brand, ...statusParts] = value.split('·').map((part) => part.trim()).filter(Boolean)
+  return {
+    brand: brand || 'ENFP',
+    status: statusParts.join(' · ') || '灵感发动机已启动 ♥',
+  }
+}
+
 function cloneSettings(settings: ThemeStudioSettings): ThemeStudioSettings {
   const cloned = structuredClone(settings)
   return {
@@ -182,6 +212,9 @@ export function ThemeStudioPage() {
   const [draft, setDraft] = useState<ThemeStudioSettings | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   const [busy, setBusy] = useState('')
+  const [marketBusy, setMarketBusy] = useState('')
+  const [market, setMarket] = useState<ThemeMarketResult | null>(null)
+  const [libraryView, setLibraryView] = useState<'local' | 'market'>('local')
   const wallpaperInput = useRef<HTMLInputElement>(null)
   const showcaseHeroInput = useRef<HTMLInputElement>(null)
   const showcasePortraitInput = useRef<HTMLInputElement>(null)
@@ -213,6 +246,27 @@ export function ThemeStudioPage() {
   useEffect(() => {
     void run('load', () => callCodex<ThemeStudioResult>('load_codex_theme_studio'))
   }, [run])
+
+  const refreshMarket = useCallback(async (silent = false) => {
+    setMarketBusy('refresh')
+    try {
+      const next = await callCodex<ThemeMarketResult>('refresh_theme_market')
+      setMarket(next)
+      if (!silent || next.status !== 'ok') setNotice(noticeFrom(next))
+      return next
+    } catch (error) {
+      if (!silent) {
+        setNotice({ tone: 'error', text: error instanceof Error ? error.message : String(error) })
+      }
+      return null
+    } finally {
+      setMarketBusy('')
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshMarket(true)
+  }, [refreshMarket])
 
   const selectedTheme = useMemo(() => {
     if (!draft) return null
@@ -395,6 +449,29 @@ export function ThemeStudioPage() {
     }
   }, [acceptResult])
 
+  const installMarketTheme = useCallback(async (id: string) => {
+    setMarketBusy(id)
+    try {
+      const next = await callCodex<ThemeMarketResult>('install_theme_market_theme', { id })
+      setMarket(next)
+      acceptResult(next)
+      if (next.status !== 'failed') setLibraryView('local')
+    } catch (error) {
+      setNotice({ tone: 'error', text: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setMarketBusy('')
+    }
+  }, [acceptResult])
+
+  const openExternal = useCallback(async (url: string) => {
+    try {
+      const next = await callCodex<{ status: string; message: string }>('open_external_url', { url })
+      if (next.status === 'failed') setNotice({ tone: 'error', text: next.message })
+    } catch (error) {
+      setNotice({ tone: 'error', text: error instanceof Error ? error.message : String(error) })
+    }
+  }, [])
+
   const deleteSelected = useCallback(async () => {
     if (!selectedTheme || selectedTheme.builtin) return
     const message = language === 'en-US'
@@ -450,6 +527,8 @@ export function ThemeStudioPage() {
       selectedTheme.showcase.heroImageDataUrl || selectedTheme.wallpaperDataUrl,
     ),
   } as CSSProperties
+  const marketThemes = market?.market.themes ?? []
+  const enfpBrand = splitEnfpBrand(selectedTheme.showcase.eyebrow)
 
   return (
     <div className="theme-studio">
@@ -480,41 +559,112 @@ export function ThemeStudioPage() {
 
       <section className="theme-library" aria-label="主题库">
         <div className="theme-section-heading">
-          <div><strong>主题库</strong><span>{draft.themes.length} 个主题</span></div>
-          <div className="theme-inline-actions">
-            <button type="button" onClick={duplicateSelected}><Copy size={15} />复制当前主题</button>
-            <button type="button" disabled={busy === 'import'} onClick={() => packageInput.current?.click()}>
-              {busy === 'import' ? <LoaderCircle className="spin" size={15} /> : <Import size={15} />}导入主题包
+          <div><strong>主题库</strong><span>{libraryView === 'local' ? `${draft.themes.length} 个主题` : `${marketThemes.length} 个市场主题`}</span></div>
+          <div className="theme-library-tabs" role="tablist" aria-label="主题视图">
+            <button type="button" role="tab" aria-selected={libraryView === 'local'} className={libraryView === 'local' ? 'active' : ''} onClick={() => setLibraryView('local')}>
+              <Palette size={14} />我的主题
+            </button>
+            <button type="button" role="tab" aria-selected={libraryView === 'market'} className={libraryView === 'market' ? 'active' : ''} onClick={() => setLibraryView('market')}>
+              <Store size={14} />主题市场
             </button>
           </div>
         </div>
-        <div className="theme-card-grid">
-          {draft.themes.map((theme) => (
-            <button
-              className={theme.id === draft.selectedThemeId ? 'theme-card selected' : 'theme-card'}
-              key={theme.id}
-              type="button"
-              onClick={() => setDraft({ ...draft, selectedThemeId: theme.id })}
-            >
-              <span
-                className="theme-card-preview"
-                style={{
-                  backgroundColor: theme.visual.background,
-                  backgroundImage: safeBackgroundImage(theme.wallpaperDataUrl),
-                  backgroundSize: 'cover',
-                }}
-              >
-                <i style={{ background: theme.visual.surface, borderColor: theme.visual.border }} />
-                <i style={{ background: theme.visual.accentSoft, borderColor: theme.visual.accent }} />
-                {theme.id === draft.selectedThemeId ? <b><Check size={14} /></b> : null}
-              </span>
-              <span className="theme-card-copy"><strong>{t(theme.name)}</strong><small>{theme.builtin ? '内置主题' : theme.author || '自定义主题'}</small></span>
-            </button>
-          ))}
-        </div>
+        {libraryView === 'local' ? (
+          <>
+            <div className="theme-library-toolbar">
+              <div className="theme-inline-actions">
+                <button type="button" onClick={duplicateSelected}><Copy size={15} />复制当前主题</button>
+                <button type="button" disabled={busy === 'import'} onClick={() => packageInput.current?.click()}>
+                  {busy === 'import' ? <LoaderCircle className="spin" size={15} /> : <Import size={15} />}导入主题包
+                </button>
+              </div>
+            </div>
+            <div className="theme-card-grid">
+              {draft.themes.map((theme) => (
+                <button
+                  className={theme.id === draft.selectedThemeId ? 'theme-card selected' : 'theme-card'}
+                  key={theme.id}
+                  type="button"
+                  onClick={() => setDraft({ ...draft, selectedThemeId: theme.id })}
+                >
+                  <span
+                    className="theme-card-preview"
+                    style={{
+                      backgroundColor: theme.visual.background,
+                      backgroundImage: safeBackgroundImage(theme.wallpaperDataUrl),
+                      backgroundSize: 'cover',
+                    }}
+                  >
+                    <i style={{ background: theme.visual.surface, borderColor: theme.visual.border }} />
+                    <i style={{ background: theme.visual.accentSoft, borderColor: theme.visual.accent }} />
+                    {theme.id === draft.selectedThemeId ? <b><Check size={14} /></b> : null}
+                  </span>
+                  <span className="theme-card-copy"><strong>{t(theme.name)}</strong><small>{theme.builtin ? '内置主题' : theme.author || '自定义主题'}</small></span>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="theme-market">
+            <div className="theme-market-toolbar">
+              <div>
+                <strong>社区主题</strong>
+                <span>{market?.market.updatedAt ? `清单更新于 ${market.market.updatedAt}` : '从 CodexPlusPlus-Themes 仓库加载'}</span>
+              </div>
+              <div className="theme-inline-actions">
+                <button type="button" disabled={marketBusy !== ''} onClick={() => void refreshMarket()}>
+                  {marketBusy === 'refresh' ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}刷新市场
+                </button>
+                <button type="button" disabled={!market?.repositoryUrl} onClick={() => market?.repositoryUrl && void openExternal(market.repositoryUrl)}>
+                  <ExternalLink size={15} />市场主页
+                </button>
+              </div>
+            </div>
+            {market?.cached || market?.warning ? (
+              <div className="theme-market-warning"><Info size={15} /><span>{market.warning || '远程仓库暂不可用，当前显示本地缓存。'}</span></div>
+            ) : null}
+            {marketThemes.length ? (
+              <div className="theme-market-grid">
+                {marketThemes.map((item) => {
+                  const status = item.updateAvailable
+                    ? '可更新'
+                    : item.installed
+                      ? item.installedVersion ? `已安装 ${item.installedVersion}` : '已安装'
+                      : '未安装'
+                  return (
+                    <article className="theme-market-card" key={item.id}>
+                      <div className="theme-market-preview">
+                        {item.previewUrl ? <img src={item.previewUrl} alt={item.name} loading="lazy" /> : <Image size={28} />}
+                        <span className={item.updateAvailable ? 'update' : item.installed ? 'installed' : ''}>{status}</span>
+                      </div>
+                      <div className="theme-market-copy">
+                        <div><strong title={item.name}>{item.name}</strong><span>v{item.version}</span></div>
+                        <small>{item.author} · {item.license}</small>
+                        <p>{item.description || '暂无主题说明。'}</p>
+                        <div className="theme-market-tags">{item.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
+                      </div>
+                      <div className="theme-market-actions">
+                        <button className="primary" type="button" disabled={marketBusy !== ''} onClick={() => void installMarketTheme(item.id)}>
+                          {marketBusy === item.id ? <LoaderCircle className="spin" size={14} /> : <Download size={14} />}
+                          {item.updateAvailable ? '更新' : item.installed ? '重新安装' : '安装'}
+                        </button>
+                        <button type="button" onClick={() => void openExternal(item.sourceUrl)}><ExternalLink size={14} />来源</button>
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="theme-market-empty">
+                {marketBusy === 'refresh' ? <LoaderCircle className="spin" size={22} /> : <Store size={22} />}
+                <span>{market?.status === 'failed' ? market.message : '正在加载主题市场…'}</span>
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
-      <div className="theme-editor-layout">
+      <div className={`theme-editor-layout${selectedTheme.id === 'enfp-doodle' ? ' theme-editor-layout-concept' : ''}`}>
         <section className="theme-preview-section">
           <div className="theme-section-heading">
             <div><strong>Codex 实时预览</strong><span>{draft.enabled ? '应用后显示' : '开启主题后显示'}</span></div>
@@ -524,13 +674,53 @@ export function ThemeStudioPage() {
           </div>
           <div className="theme-codex-preview" style={previewStyle}>
             <div className="theme-preview-wallpaper" />
-            <aside>
-              <div className="theme-preview-brand"><Sparkles size={15} /><strong>Codex</strong></div>
-              <button type="button" className="active"><MonitorCog size={14} />新建任务</button>
-              <button type="button"><Check size={14} />已有任务</button>
-              <span>项目</span>
-              <button type="button">主题工坊开发</button>
-              <button type="button">远程控制验证</button>
+            <aside className={selectedTheme.id === 'enfp-doodle' ? 'theme-preview-sidebar-enfp' : undefined}>
+              {selectedTheme.id === 'enfp-doodle' ? (
+                <>
+                  <div className="theme-preview-enfp-sidebar-brand">
+                    <div className="theme-preview-brand"><strong>Codex</strong><Sparkles size={14} /></div>
+                    <button type="button" className="theme-preview-enfp-search" title="搜索"><Search size={14} /></button>
+                  </div>
+                  <nav className="theme-preview-enfp-nav">
+                    <button type="button" className="new-task"><CirclePlus size={15} />新建任务</button>
+                    <button type="button" className="coral"><CalendarDays size={14} />已安排</button>
+                    <button type="button" className="mint"><Blocks size={14} />技能</button>
+                    <button type="button" className="sky"><Globe2 size={14} />站点</button>
+                    <button type="button" className="violet"><GitPullRequest size={14} />拉取请求</button>
+                    <button type="button" className="mint"><MessageCircle size={14} />聊天</button>
+                  </nav>
+                  <div className="theme-preview-enfp-scroll">
+                    <span className="theme-preview-enfp-heading">项目</span>
+                    <button type="button" className="theme-preview-enfp-project"><FolderOpen size={14} />ENFP 小宇宙项目</button>
+                    {['灵感收集站', '脑暴草稿箱', '创意实验室', '组件游乐场', '最终落地版'].map((label) => (
+                      <button type="button" className="theme-preview-enfp-thread" key={label}><i />{label}</button>
+                    ))}
+                    <span className="theme-preview-enfp-heading">任务</span>
+                    {['做一个会说话的按钮', '把想法倒成小 Demo', '重构一下更丝滑', '加点动效吧', '修复那个烦人的 Bug'].map((label) => (
+                      <button type="button" className="theme-preview-enfp-task" key={label}><CircleCheck size={13} />{label}</button>
+                    ))}
+                  </div>
+                  <div className="theme-preview-enfp-energy">
+                    <Zap size={12} />
+                    <span>ENFP 能量值<i><b /></i></span>
+                    <strong>100%</strong>
+                  </div>
+                  <div className="theme-preview-enfp-account">
+                    <i><UserRound size={13} /></i>
+                    <span><strong>小宇宙发射中</strong><small>灵感在线</small></span>
+                    <Settings size={13} />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="theme-preview-brand"><Sparkles size={15} /><strong>Codex</strong></div>
+                  <button type="button" className="active"><MonitorCog size={14} />新建任务</button>
+                  <button type="button"><Check size={14} />已有任务</button>
+                  <span>项目</span>
+                  <button type="button">主题工坊开发</button>
+                  <button type="button">远程控制验证</button>
+                </>
+              )}
             </aside>
             <main>
               <header><div><small>Codex Compass Theme</small><strong>{t(selectedTheme.name)}</strong></div><span>{draft.enabled ? 'ON' : 'OFF'}</span></header>
@@ -547,13 +737,32 @@ export function ThemeStudioPage() {
                 data-hero-position={selectedTheme.presentation.heroPosition}
                 data-task-mode={selectedTheme.presentation.taskMode}
               >
+                {selectedTheme.id === 'enfp-doodle' ? (
+                  <div className="theme-preview-enfp-brand" aria-hidden="true">
+                    <strong>{enfpBrand.brand}</strong>
+                    <span>{enfpBrand.status}</span>
+                  </div>
+                ) : null}
                 <div className="theme-preview-showcase-copy">
                   {selectedTheme.presentation.headerBadge ? (
                     <span className="theme-preview-header-badge"><Sparkles size={11} />{t(selectedTheme.presentation.headerBadge)}</span>
                   ) : null}
-                  {selectedTheme.showcase.eyebrow ? <small>{t(selectedTheme.showcase.eyebrow)}</small> : null}
-                  <h2>{t(selectedTheme.showcase.title || selectedTheme.name)}</h2>
-                  {selectedTheme.showcase.subtitle ? <p>{t(selectedTheme.showcase.subtitle)}</p> : null}
+                  {selectedTheme.id !== 'enfp-doodle' && selectedTheme.showcase.eyebrow ? <small>{t(selectedTheme.showcase.eyebrow)}</small> : null}
+                  <h2>
+                    {selectedTheme.id === 'enfp-doodle' && selectedTheme.showcase.title === '先有灵感，再把它变成真的' ? (
+                      <>
+                        <span>先有灵感</span><i>，再把它变成</i><span>真的</span>
+                      </>
+                    ) : t(selectedTheme.showcase.title || selectedTheme.name)}
+                  </h2>
+                  {selectedTheme.id === 'enfp-doodle' ? (
+                    <>
+                      <p className="theme-preview-enfp-mode"><strong>ENFP 模式：</strong><span>脑暴</span>、<i>试错</i>、<b>灵感乱飞</b>，但最后都能落地。</p>
+                      <div className="theme-preview-enfp-tags">
+                        {['# 自由探索', '# 创意无限', '# 热情驱动', '# 趣味至上'].map((tag) => <span key={tag}>{tag}</span>)}
+                      </div>
+                    </>
+                  ) : selectedTheme.showcase.subtitle ? <p>{t(selectedTheme.showcase.subtitle)}</p> : null}
                 </div>
                 {selectedTheme.showcase.portraitImageDataUrl ? (
                   <img src={selectedTheme.showcase.portraitImageDataUrl} alt="" />
@@ -562,6 +771,13 @@ export function ThemeStudioPage() {
                   <Sparkles size={13} />
                   <span>{t(motifLabels[selectedTheme.presentation.motifStyle])}</span>
                 </div>
+                {selectedTheme.id === 'enfp-doodle' ? (
+                  <>
+                    <div className="theme-preview-enfp-bubbles" aria-hidden="true"><span>今天适合开脑洞 ✦</span><span>好点子 +99</span></div>
+                    <div className="theme-preview-enfp-skin" aria-hidden="true"><strong>♛ 专属皮肤 · ENFP</strong><span>ID: ENFP_灵感小王子</span></div>
+                    <div className="theme-preview-enfp-mood" aria-hidden="true"><strong>今日心情卡 ☺</strong><span>创意 +100</span><span>动力 +100</span><span>乐趣 +100</span></div>
+                  </>
+                ) : null}
                 {selectedTheme.showcase.enabled && selectedTheme.showcase.showCards ? (
                   <div className="theme-preview-showcase-cards">
                     {selectedTheme.showcase.cards.slice(0, 4).map((card, index) => {
@@ -569,7 +785,8 @@ export function ThemeStudioPage() {
                       return (
                         <button type="button" key={`${card.icon}-${index}`}>
                           <i><Icon size={15} /></i>
-                          <span>{t(card.title)}</span>
+                          <span><strong>{t(card.title)}</strong><small>{t(summarizeShowcasePrompt(card.prompt))}</small></span>
+                          <ArrowRight size={12} />
                         </button>
                       )
                     })}
@@ -581,7 +798,7 @@ export function ThemeStudioPage() {
                 <strong>{t(taskModeLabels[selectedTheme.presentation.taskMode])}</strong>
                 <i>{selectedTheme.presentation.taskMode === 'off' ? '0%' : `${selectedTheme.presentation.taskWallpaperOpacity}%`}</i>
               </div>
-              <footer><span>输入消息或描述任务</span><button type="button"><Upload size={15} /></button></footer>
+              <footer><span>{selectedTheme.id === 'enfp-doodle' ? '对 ENFP 助手说点什么…' : '输入消息或描述任务'}</span><button type="button"><Upload size={15} /></button></footer>
             </main>
           </div>
         </section>

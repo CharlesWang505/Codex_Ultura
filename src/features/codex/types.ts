@@ -296,7 +296,13 @@ export type WatcherResult = CommandResult<{
   lastError: string | null
   disabledFlag: string
 }>
-export type LogsResult = CommandResult<{ path: string; text: string; lines: number }>
+export type LogsResult = CommandResult<{
+  path: string
+  text: string
+  lines: number
+  truncated: boolean
+  fileSize: number
+}>
 export type DiagnosticsResult = CommandResult<{ report: string }>
 export type InstallResult = CommandResult<{
   silentShortcut: { installed: boolean; path: string | null }

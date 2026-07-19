@@ -80,3 +80,35 @@ export type ThemeStudioResult = CommandResult<{
   runtimeStatus: string
   debugPort: number
 }>
+
+export type ThemeMarketItem = {
+  id: string
+  name: string
+  version: string
+  author: string
+  description: string
+  license: string
+  sourceUrl: string
+  tags: string[]
+  previewUrl: string
+  installed: boolean
+  installedVersion: string
+  updateAvailable: boolean
+}
+
+export type ThemeMarketResult = CommandResult<{
+  market: {
+    schemaVersion: number
+    updatedAt: string
+    themes: ThemeMarketItem[]
+  }
+  cached: boolean
+  warning: string
+  repositoryUrl: string
+  settings: ThemeStudioSettings
+  settingsPath: string
+  packageFormat: string
+  runtimeConnected: boolean
+  runtimeStatus: string
+  debugPort: number
+}>

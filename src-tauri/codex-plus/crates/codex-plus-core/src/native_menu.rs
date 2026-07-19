@@ -50,6 +50,7 @@ const MENU_LABEL_TRANSLATIONS: &[(&str, &str)] = &[
     ("Toggle Sidebar", "切换边栏"),
     ("Toggle Bottom Panel", "切换底部面板"),
     ("Toggle Pinned Summary", "切换固定摘要"),
+    ("Toggle Review Panel", "切换审查面板"),
     ("Open Terminal", "打开终端"),
     ("Open Browser Tab", "打开浏览器标签页"),
     ("Toggle Browser Panel", "切换浏览器面板"),
@@ -73,7 +74,9 @@ const MENU_LABEL_TRANSLATIONS: &[(&str, &str)] = &[
     ("Zoom Out", "缩小"),
     ("Actual Size", "实际大小"),
     ("Toggle Full Screen", "切换全屏"),
+    ("Documentation", "Codex 文档"),
     ("Codex Documentation", "Codex 文档"),
+    ("What's New", "更新内容"),
     ("What's new", "更新内容"),
     ("Automations", "自动化"),
     ("Local Environments", "本地环境"),
@@ -81,7 +84,12 @@ const MENU_LABEL_TRANSLATIONS: &[(&str, &str)] = &[
     ("Skills", "技能"),
     ("Model Context Protocol", "模型上下文协议"),
     ("Troubleshooting", "故障排查"),
+    ("System Status", "系统状态"),
     ("Send Feedback", "发送反馈"),
+    ("Start Performance Trace", "开始性能跟踪"),
+    ("Stop Performance Trace", "停止性能跟踪"),
+    ("About Codex", "关于 Codex"),
+    ("About ChatGPT", "关于 ChatGPT"),
     ("Check for Updates…", "检查更新..."),
     ("Updates Unavailable", "更新不可用"),
     ("Toggle Debug Menu", "切换调试菜单"),
@@ -118,14 +126,25 @@ pub fn native_menu_localizer_script() -> anyhow::Result<String> {
     Ok(format!(
         r#"
 (() => {{
-  const translations = new Map({translations});
+  const normalizeLabel = (label) => (typeof label === "string" ? label : "")
+    .replace(/\.\.\./g, "…")
+    .replace(/\s+/g, " ")
+    .trim();
+  const translations = new Map(
+    {translations}.map(([label, localized]) => [normalizeLabel(label), localized])
+  );
+  const foldedTranslations = new Map(
+    [...translations].map(([label, localized]) => [label.toLocaleLowerCase("en-US"), localized])
+  );
   const electron = process.mainModule?.require?.("electron");
   if (!electron?.Menu) return JSON.stringify({{ status: "skipped", reason: "electron-menu-unavailable" }});
   const Menu = electron.Menu;
   let changed = 0;
   const translateItem = (item) => {{
     if (!item) return;
-    const nextLabel = translations.get(item.label);
+    const label = normalizeLabel(item.label);
+    const nextLabel = translations.get(label)
+      ?? foldedTranslations.get(label.toLocaleLowerCase("en-US"));
     if (nextLabel && item.label !== nextLabel) {{
       item.label = nextLabel;
       changed += 1;
@@ -219,6 +238,13 @@ mod tests {
         assert!(script.contains("Menu.setApplicationMenu"));
         assert!(script.contains("Toggle Sidebar"));
         assert!(script.contains("切换边栏"));
+        assert!(script.contains(r#"["Toggle Review Panel","切换审查面板"]"#));
+        assert!(script.contains(r#"["Documentation","Codex 文档"]"#));
+        assert!(script.contains(r#"["System Status","系统状态"]"#));
+        assert!(script.contains(r#"["Start Performance Trace","开始性能跟踪"]"#));
+        assert!(script.contains(r#"["About ChatGPT","关于 ChatGPT"]"#));
+        assert!(script.contains(r#".replace(/\.\.\./g, "…")"#));
+        assert!(script.contains("foldedTranslations"));
         assert!(!script.contains("app.asar"));
     }
 }

@@ -16,7 +16,7 @@ test('VPS installer keeps Relay on loopback and renders HTTPS/WSS endpoints', as
   assert.match(script, /https:\/\/\$DOMAIN/)
   assert.match(script, /sha256sum -c/)
   assert.match(script, /--non-interactive/)
-  assert.doesNotMatch(script, /wek\.us\.ci|154\.219\.117\.16/)
+  assert.doesNotMatch(script, /private\.example|192\.0\.2\.10/)
 })
 
 test('Windows deployment wizard validates a self-hosted domain in dry-run mode', () => {
@@ -53,6 +53,6 @@ test('deployment templates contain only documentation examples', async () => {
   ]
   const contents = await Promise.all(files.map((file) => readFile(file, 'utf8')))
   const joined = contents.join('\n')
-  assert.doesNotMatch(joined, /wek\.us\.ci|154\.219\.117\.16/)
+  assert.doesNotMatch(joined, /private\.example|192\.0\.2\.10/)
   assert.match(joined, /relay\.example\.com/)
 })

@@ -1503,7 +1503,11 @@ async fn hot_switch_model_mapping_selects_mapped_key_and_rewrites_upstream_model
     let request = server.await.unwrap();
 
     assert_eq!(result.status_code, 200);
-    assert!(request.contains("Authorization: Bearer mapped-key"));
+    assert!(request.lines().any(|line| {
+        line.split_once(':').is_some_and(|(name, value)| {
+            name.eq_ignore_ascii_case("authorization") && value.trim() == "Bearer mapped-key"
+        })
+    }));
     assert!(request.contains(r#""model":"upstream-real-model""#));
     assert!(!request.contains(r#""model":"codex-choice""#));
 }

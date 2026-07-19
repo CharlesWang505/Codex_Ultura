@@ -291,7 +291,7 @@ fn apply_relay_config_writes_isolated_provider_without_live_config_carryover() {
     std::fs::write(
         temp.path().join("config.toml"),
         r#"model = "gpt-5"
-model_catalog_json = 'C:\Users\Administrator\.codex\model-catalogs\relay-mpgm24lf.json'
+model_catalog_json = 'C:\Users\ExampleUser\.codex\model-catalogs\relay-mpgm24lf.json'
 model_provider = "custom1"
 [model_providers.custom1]
 name = "custom1"
@@ -593,12 +593,9 @@ fn apply_pure_api_config_switches_auth_json_and_writes_provider_token() {
     .unwrap();
     std::fs::write(temp.path().join("config.toml"), r#"model = "gpt-5""#).unwrap();
 
-    let result = apply_pure_api_config_to_home(
-        temp.path(),
-        "http://192.0.2.10:3001/v1",
-        "sk-test-redacted",
-    )
-    .unwrap();
+    let result =
+        apply_pure_api_config_to_home(temp.path(), "http://192.0.2.10:3001/v1", "sk-test-redacted")
+            .unwrap();
 
     let auth: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(temp.path().join("auth.json")).unwrap())
@@ -706,8 +703,8 @@ fn lists_codex_context_entries_with_parent_mcp_table() {
 
 [mcp_servers.ida-pro-mcp]
 type = "stdio"
-command = 'C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe'
-args = ['C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\site-packages\ida_pro_mcp\server.py']
+command = 'C:\Users\ExampleUser\AppData\Local\Programs\Python\Python313\python.exe'
+args = ['C:\Users\ExampleUser\AppData\Local\Programs\Python\Python313\Lib\site-packages\ida_pro_mcp\server.py']
 disabled = false
 timeout = 1800
 "#,
@@ -933,8 +930,8 @@ goals = true
 #[test]
 fn sanitizes_model_catalog_json_from_invalid_common_config() {
     let sanitized = sanitize_common_config_contents(
-        r#"model_catalog_json = "C:\\Users\\Administrator\\.codex\\model-catalogs\\relay-a.json"
-model_catalog_json = 'C:\Users\Administrator\.codex\model-catalogs\relay-b.json'
+        r#"model_catalog_json = "C:\\Users\\ExampleUser\\.codex\\model-catalogs\\relay-a.json"
+model_catalog_json = 'C:\Users\ExampleUser\.codex\model-catalogs\relay-b.json'
 model_reasoning_effort = "high"
 "#,
     );
@@ -993,7 +990,7 @@ command = "old"
         temp.path(),
         r#"model = "gpt-5"
 model_provider = "custom"
-model_catalog_json = 'C:\Users\Administrator\.codex\model-catalogs\relay-mpgm24lf.json'
+model_catalog_json = 'C:\Users\ExampleUser\.codex\model-catalogs\relay-mpgm24lf.json'
 [model_providers.custom]
 name = "custom"
 wire_api = "responses"
@@ -2609,7 +2606,7 @@ enabled = true
 
 [marketplaces.role-specific-plugins]
 source_type = "local"
-source = 'C:\Users\me\.codex\.tmp\marketplaces\role-specific-plugins'
+source = 'C:\Users\ExampleUser\.codex\.tmp\marketplaces\role-specific-plugins'
 "#,
     )
     .unwrap();

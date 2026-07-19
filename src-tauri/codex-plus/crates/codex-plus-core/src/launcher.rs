@@ -529,21 +529,38 @@ fn start_native_menu_localizer(inspector_port: u16) {
 fn apply_codexplusplus_window_icon_after_launch(process_id: u32) {
     let icon_resource_path =
         std::env::current_exe().unwrap_or_else(|_| PathBuf::from("codex_plus.exe"));
+    let title_bar_text_color =
+        crate::theme_studio::ThemeStudioManager::default().title_bar_text_color();
     tokio::spawn(async move {
+        let mut icon_applied = false;
+        let mut title_bar_text_color_applied = false;
         for attempt in 1..=30 {
-            if crate::windows_apply_codexplusplus_icon_to_process_window(
-                process_id,
-                icon_resource_path.clone(),
-            ) {
+            if !icon_applied {
+                icon_applied = crate::windows_apply_codexplusplus_icon_to_process_window(
+                    process_id,
+                    icon_resource_path.clone(),
+                );
+            }
+            if !title_bar_text_color_applied {
+                title_bar_text_color_applied =
+                    crate::windows_apply_codex_title_bar_text_color_to_process_window(
+                        process_id,
+                        title_bar_text_color,
+                    );
+            }
+            if icon_applied && title_bar_text_color_applied {
                 return;
             }
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             if attempt == 30 {
                 let _ = crate::diagnostic_log::append_diagnostic_log(
-                    "launcher.window_icon.apply_failed",
+                    "launcher.window_branding.apply_failed",
                     serde_json::json!({
                         "process_id": process_id,
-                        "icon_resource_path": icon_resource_path.to_string_lossy()
+                        "icon_resource_path": icon_resource_path.to_string_lossy(),
+                        "icon_applied": icon_applied,
+                        "title_bar_text_color_applied": title_bar_text_color_applied,
+                        "title_bar_text_color": format!("{title_bar_text_color:?}")
                     }),
                 );
             }

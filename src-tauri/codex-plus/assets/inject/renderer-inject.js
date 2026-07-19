@@ -401,7 +401,7 @@
   const chatsSortRefreshIntervalMs = 1500;
   const chatsSortDbRefreshIntervalMs = 5000;
   const styleId = "codex-delete-style";
-  const codexDeleteStyleVersion = "14";
+  const codexDeleteStyleVersion = "15";
   const codexPlusMenuId = "codex-plus-menu";
   const codexPlusMenuFloatingClass = "codex-plus-menu-floating";
   const codexDeleteVersion = "7";
@@ -416,11 +416,24 @@
   const codexThreadServiceTierVersion = "1";
   const codexServiceTierBadgeClass = "codex-service-tier-badge";
   const codexServiceTierBadgeVersion = "3";
-  const codexMenuLocalizationVersion = "1";
+  const codexMenuLocalizationVersion = "3";
   const codexMenuLocalizationMap = new Map([
+    ["File", "文件"],
+    ["Edit", "编辑"],
+    ["View", "视图"],
+    ["Window", "窗口"],
+    ["Help", "帮助"],
+    ["Undo", "撤销"],
+    ["Redo", "重做"],
+    ["Cut", "剪切"],
+    ["Copy", "复制"],
+    ["Paste", "粘贴"],
+    ["Delete", "删除"],
+    ["Select All", "全选"],
     ["Toggle Sidebar", "切换侧边栏"],
     ["Toggle Bottom Panel", "切换底部面板"],
     ["Toggle Pinned Summary", "切换置顶摘要"],
+    ["Toggle Review Panel", "切换审查面板"],
     ["Open Terminal", "打开终端"],
     ["Toggle File Tree", "切换文件树"],
     ["Open Browser Tab", "打开浏览器标签页"],
@@ -438,12 +451,50 @@
     ["Zoom Out", "缩小"],
     ["Actual Size", "实际大小"],
     ["Toggle Full Screen", "切换全屏"],
+    ["Documentation", "Codex 文档"],
+    ["Codex Documentation", "Codex 文档"],
+    ["What's New", "更新内容"],
+    ["What's new", "更新内容"],
+    ["Troubleshooting", "故障排查"],
+    ["System Status", "系统状态"],
+    ["Send Feedback", "发送反馈"],
+    ["Start Performance Trace", "开始性能跟踪"],
+    ["Stop Performance Trace", "停止性能跟踪"],
+    ["About Codex", "关于 Codex"],
+    ["About ChatGPT", "关于 ChatGPT"],
     ["Keyboard Shortcuts", "键盘快捷键"],
+    ["Process Manager", "进程管理器"],
+    ["Reload Window", "重新加载窗口"],
+    ["Log Out", "退出登录"],
+    ["Dictation", "听写"],
+    ["Wake Pet", "唤醒助手"],
+    ["Go to Chat 1", "转到对话 1"],
+    ["Go to Chat 2", "转到对话 2"],
+    ["Go to Chat 3", "转到对话 3"],
+    ["Go to Chat 4", "转到对话 4"],
+    ["Go to Chat 5", "转到对话 5"],
+    ["Go to Chat 6", "转到对话 6"],
+    ["Go to Chat 7", "转到对话 7"],
+    ["Go to Chat 8", "转到对话 8"],
+    ["Go to Chat 9", "转到对话 9"],
+    ["Automations", "自动化"],
+    ["Local Environments", "本地环境"],
+    ["Worktrees", "工作树"],
+    ["Skills", "技能"],
+    ["Model Context Protocol", "模型上下文协议"],
+    ["Check for Updates…", "检查更新…"],
+    ["Updates Unavailable", "更新不可用"],
+    ["Start Trace Recording", "开始跟踪录制"],
+    ["Toggle Debug Menu", "切换调试菜单"],
+    ["Open Deeplink from Clipboard", "从剪贴板打开深度链接"],
+    ["Toggle Query Devtools", "切换查询 DevTools"],
+    ["Toggle React Scan", "切换 React Scan"],
     ["Open command menu", "打开命令菜单"],
     ["Search Chats…", "搜索对话…"],
     ["Search Files…", "搜索文件…"],
     ["New Chat", "新建对话"],
     ["Quick Chat", "快速对话"],
+    ["Rename chat", "重命名对话"],
     ["Open in New Window", "在新窗口打开"],
     ["Archive chat", "归档对话"],
     ["Pin/unpin chat", "置顶/取消置顶对话"],
@@ -456,7 +507,98 @@
     ["Copy deeplink", "复制深层链接"],
     ["Copy session id", "复制会话 ID"],
     ["Copy working directory", "复制工作目录"],
+    ["custom", "自定义"],
   ]);
+  const codexPluginMarketplaceLocalizationVersion = "1";
+  const codexPluginMarketplaceLocalizationMap = new Map([
+    ["Featured", "精选"],
+    ["Productivity", "生产力"],
+    ["Business & Operations", "商业与运营"],
+    ["Communication", "通信"],
+    ["Creativity", "创意"],
+    ["Data & Analytics", "数据与分析"],
+    ["Developer Tools", "开发者工具"],
+    ["Education & Research", "教育与研究"],
+    ["Engineering", "工程"],
+    ["Finance", "金融"],
+    ["Other", "其他"],
+    ["Research", "研究"],
+    ["Security", "安全"],
+    ["Travel", "旅行"],
+    ["Search plugins", "搜索插件"],
+    ["Installed", "已安装"],
+    ["Public", "公开"],
+    ["Personal", "个人"],
+    ["Install", "安装"],
+    ["Uninstall", "卸载"],
+    ["Computer Use", "计算机操作"],
+    ["Spreadsheets", "电子表格"],
+    ["Presentations", "演示文稿"],
+    ["Documents", "文档"],
+    ["Template Creator", "模板创建器"],
+    ["Sites", "网站"],
+    ["Visualize", "可视化"],
+    ["Control Windows apps from ChatGPT", "通过 ChatGPT 操作 Windows 应用"],
+    ["Control Chrome with ChatGPT", "通过 ChatGPT 操作 Chrome"],
+    ["Create and edit spreadsheet files", "创建和编辑电子表格文件"],
+    ["Create and edit presentations", "创建和编辑演示文稿"],
+    ["Create and edit document artifacts", "创建和编辑文档"],
+    ["Read, create, and verify PDF files", "读取、创建并验证 PDF 文件"],
+    ["Create or update templates for...", "创建或更新模板..."],
+    ["Create or update templates for documents, spreadsheets, and presentations", "创建或更新文档、电子表格和演示文稿模板"],
+    ["Build and deploy websites with Sites", "使用 Sites 构建并部署网站"],
+    ["Turn ideas and data into interactive...", "将想法和数据转化为交互式可视化..."],
+    ["Turn ideas and data into interactive visuals", "将想法和数据转化为交互式可视化"],
+    ["Find and reference issues and projects.", "查找并引用问题和项目。"],
+    ["Manage Jira and Confluence fast", "快速管理 Jira 和 Confluence"],
+    ["Manage Google Calendar events and schedules", "管理 Google Calendar 日程和安排"],
+    ["Summarize SharePoint sites and files", "汇总 SharePoint 站点和文件"],
+    ["Manage Outlook schedules and meeting changes", "管理 Outlook 日程和会议变更"],
+    ["Screen record with context", "录制包含上下文的屏幕内容"],
+    ["Search and reference your documents", "搜索并引用你的文档"],
+    ["Work across Drive, Docs, Sheets, and Slides", "跨 Drive、Docs、Sheets 和 Slides 工作"],
+    ["Notion workflows for specs, research, meetings, and knowledge capture", "用于规格、研究、会议和知识沉淀的 Notion 工作流"],
+    ["The Brand24 app in Codex lets marketing and PR teams instantly explore brand mentions, sentiment, and med...", "Brand24 可让营销和公关团队在 Codex 中快速分析品牌提及、情感倾向和媒体数据..."],
+    ["Channel99 real time go to market intelligence connects Codex directly to Channel99’s performance marketin...", "Channel99 实时市场情报将 Codex 直接连接到 Channel99 的营销绩效数据..."],
+    ["Turn Codex into your ClickUp command center.", "将 Codex 变成你的 ClickUp 指挥中心。"],
+    ["Embed complete buyer intelligence directly within Codex.", "将完整的买家情报直接嵌入 Codex。"],
+    ["The Conductor MCP server retrieves proprietary performance metrics regarding a brand's visibility, sentimen...", "Conductor MCP 服务器可获取品牌可见度、情感倾向等专有绩效指标..."],
+    ["Search your enterprise content", "搜索企业内容"],
+    ["Docket AI makes your sales knowledge your instant superpower.", "Docket AI 让销售知识随时为你所用。"],
+    ["Monitor and manage your network infrastructure through natural language.", "通过自然语言监控和管理网络基础设施。"],
+    ["Connect Dovetail inside Codex to turn customer feedback into decisions without leaving your conversation.", "在 Codex 中连接 Dovetail，无需离开对话即可将客户反馈转化为决策。"],
+    ["Work with documents and files stored in Egnyte directly from Codex.", "直接在 Codex 中处理存储于 Egnyte 的文档和文件。"],
+    ["Happenstance searches your professional network using natural language to find the right people.", "Happenstance 使用自然语言搜索职业关系网，帮助你找到合适的人。"],
+    ["Connect to sync Help Scout mailboxes and conversations for use in Codex.", "连接并同步 Help Scout 邮箱和对话，供 Codex 使用。"],
+    ["HighLevel gives agencies a unified CRM, automation, and client communication platform.", "HighLevel 为代理机构提供统一的 CRM、自动化和客户沟通平台。"],
+    ["Give Codex the full context of your second brain by connecting your Mem knowledge base.", "连接 Mem 知识库，为 Codex 提供你的第二大脑完整上下文。"],
+    ["A powerful MCP connector enabling AI agents to seamlessly interact with monday.com.", "强大的 MCP 连接器，让 AI 智能体与 monday.com 无缝交互。"],
+    ["The Network Solutions Domain Search Assistant makes finding an available domain fast, simple, and conversat...", "Network Solutions 域名搜索助手让可用域名查找更快速、简单且自然..."],
+    ["Access Pylon's customer support platform directly from Codex to search, manage, and resolve customer issues.", "直接从 Codex 访问 Pylon 客服平台，搜索、管理并解决客户问题。"],
+    ["Ranked AI provides industry leading AI SEO & PPC software, with a fully managed service integrated into it.", "Ranked AI 提供行业领先的 AI SEO 与 PPC 软件，并集成全托管服务。"],
+    ["The Responsive App makes it easy to work with your organization’s data inside Codex.", "Responsive 应用让你能在 Codex 中轻松处理组织数据。"],
+    ["The Semrush MCP provides structured, quantitative SEO and traffic data for domains, keywords, backlinks, an...", "Semrush MCP 提供域名、关键词、反向链接等结构化 SEO 与流量数据..."],
+    ["Get documents signed faster without switching between tools.", "无需切换工具即可更快完成文档签署。"],
+    ["Search and explore satellite imagery from top providers including Vantor, Planet, Airbus, and more, all in...", "在一个位置搜索和探索 Vantor、Planet、Airbus 等供应商的卫星影像..."],
+    ["Connect to sync Teamwork projects and tasks for use in Codex.", "连接并同步 Teamwork 项目和任务，供 Codex 使用。"],
+    ["Get the right equipment for the job without guesswork.", "无需猜测即可为工作找到合适的设备。"],
+    ["Waldo is an AI-powered strategy platform for agencies and brands.", "Waldo 是面向代理机构和品牌的 AI 策略平台。"],
+    ["Read and manage Asana", "读取和管理 Asana"],
+    ["Manage secure M&A data rooms", "管理安全的并购数据室"],
+    ["Automate contract creation and insights", "自动完成合同创建与洞察分析"],
+  ]);
+  function normalizeCodexMenuLabel(value) {
+    return (value || "")
+      .replace(/\.{3}/g, "…")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  const codexMenuLocalizationFoldedMap = new Map(
+    [...codexMenuLocalizationMap].map(([label, localized]) => [normalizeCodexMenuLabel(label).toLocaleLowerCase("en-US"), localized])
+  );
+  const codexPluginMarketplaceLocalizationNormalizedMap = new Map(
+    [...codexPluginMarketplaceLocalizationMap].map(([label, localized]) => [normalizeCodexMenuLabel(label), localized])
+  );
   let codexPlusVersion = window.__CODEX_PLUS_VERSION__ || "unknown";
   const codexPlusBuild = window.__CODEX_PLUS_BUILD__ || "unknown";
   const codexPlusSettingsKey = "codexPlusSettings";
@@ -857,6 +999,24 @@
         border-color: #ef4444;
         background: #dc2626;
         color: #ffffff;
+      }
+      [data-codex-api-logout="true"] {
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        flex-wrap: nowrap !important;
+        gap: 8px !important;
+        min-height: 29px !important;
+        white-space: nowrap !important;
+      }
+      [data-codex-api-logout="true"] svg {
+        flex: 0 0 16px !important;
+      }
+      [data-codex-api-logout="true"] span {
+        min-width: 0 !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        white-space: nowrap !important;
       }
       /* Dark theme overrides for delete-confirm and project-move dialogs.
          Triggered either by Codex applying a "dark" class / data-theme="dark"
@@ -7134,6 +7294,14 @@
     return document.body || document.documentElement;
   }
 
+  function localizedCodexMenuLabel(value) {
+    const normalized = normalizeCodexMenuLabel(value);
+    if (!normalized) return "";
+    return codexMenuLocalizationMap.get(normalized)
+      || codexMenuLocalizationFoldedMap.get(normalized.toLocaleLowerCase("en-US"))
+      || "";
+  }
+
   function shouldLocalizeCodexMenuNode(node) {
     if (!node || node.nodeType !== Node.TEXT_NODE || !node.nodeValue) return false;
     const parent = node.parentElement;
@@ -7147,8 +7315,7 @@
     const original = node.nodeValue;
     const leading = original.match(/^\s*/)?.[0] || "";
     const trailing = original.match(/\s*$/)?.[0] || "";
-    const normalized = original.replace(/\s+/g, " ").trim();
-    const localized = codexMenuLocalizationMap.get(normalized);
+    const localized = localizedCodexMenuLabel(original);
     if (!localized) return false;
     const next = `${leading}${localized}${trailing}`;
     if (next === original) return false;
@@ -7166,7 +7333,7 @@
       if (!element.closest?.(codexMenuLocalizationScopeSelector())) return;
       for (const attribute of ["aria-label", "title", "placeholder"]) {
         const value = element.getAttribute(attribute);
-        const localized = codexMenuLocalizationMap.get((value || "").replace(/\s+/g, " ").trim());
+        const localized = localizedCodexMenuLabel(value);
         if (localized && localized !== value) {
           element.setAttribute(attribute, localized);
           changed = true;
@@ -7192,6 +7359,76 @@
       if (localizeCodexMenuAttributes(scope)) changed = true;
       scope.dataset.codexMenuLocalizationVersion = codexMenuLocalizationVersion;
     }
+    return changed;
+  }
+
+  function codexForceChineseLocaleEnabled() {
+    return window.__CODEX_PLUS_FORCE_CHINESE_LOCALE__?.enabled === true;
+  }
+
+  function codexPluginMarketplaceRoot() {
+    const searchInput = [...document.querySelectorAll("input[placeholder]")]
+      .find((input) => /^(search plugins|搜索插件)$/i.test(normalizeCodexMenuLabel(input.getAttribute("placeholder"))));
+    if (searchInput) return searchInput.closest("main") || searchInput.parentElement?.parentElement || null;
+    const heading = [...document.querySelectorAll("h1, h2, h3")]
+      .find((node) => /^(plugins|插件)$/i.test(normalizedElementText(node)));
+    return heading?.closest("main") || null;
+  }
+
+  function localizedCodexPluginMarketplaceLabel(value) {
+    const normalized = normalizeCodexMenuLabel(value);
+    if (!normalized) return "";
+    return codexPluginMarketplaceLocalizationNormalizedMap.get(normalized) || "";
+  }
+
+  function localizeCodexPluginMarketplace(root = codexPluginMarketplaceRoot()) {
+    if (!codexForceChineseLocaleEnabled() || !root?.querySelectorAll) return false;
+    let changed = false;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const parent = node.parentElement;
+      if (!parent || isExtensionUiNode(parent) || parent.closest("textarea, input, [contenteditable='true']")) continue;
+      const original = node.nodeValue || "";
+      const leading = original.match(/^\s*/)?.[0] || "";
+      const trailing = original.match(/\s*$/)?.[0] || "";
+      const localized = localizedCodexPluginMarketplaceLabel(original);
+      if (!localized) continue;
+      const next = `${leading}${localized}${trailing}`;
+      if (next !== original) {
+        node.nodeValue = next;
+        changed = true;
+      }
+    }
+    root.querySelectorAll("[aria-label], [title], [placeholder]").forEach((element) => {
+      if (isExtensionUiNode(element) || element.closest("textarea, [contenteditable='true']")) return;
+      for (const attribute of ["aria-label", "title", "placeholder"]) {
+        const value = element.getAttribute(attribute);
+        const localized = localizedCodexPluginMarketplaceLabel(value);
+        if (localized && localized !== value) {
+          element.setAttribute(attribute, localized);
+          changed = true;
+        }
+      }
+    });
+    root.dataset.codexPluginMarketplaceLocalizationVersion = codexPluginMarketplaceLocalizationVersion;
+    return changed;
+  }
+
+  function localizeCodexStandaloneCustomLabels() {
+    if (!codexForceChineseLocaleEnabled()) return false;
+    let changed = false;
+    document.querySelectorAll("button, [role='button'], [role='menuitem']").forEach((element) => {
+      if (isExtensionUiNode(element) || element.closest("[data-message-author-role], [data-testid='conversation-turn'], main .prose")) return;
+      if (normalizedElementText(element).toLocaleLowerCase("en-US") !== "custom") return;
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        if (normalizeCodexMenuLabel(node.nodeValue).toLocaleLowerCase("en-US") !== "custom") continue;
+        node.nodeValue = node.nodeValue.replace(/custom/i, "自定义");
+        changed = true;
+      }
+    });
     return changed;
   }
 
@@ -9175,6 +9412,8 @@
     installCodexProjectlessNewTaskButtons();
     installCodexPlusMenu();
     localizeCodexMenus();
+    localizeCodexPluginMarketplace();
+    localizeCodexStandaloneCustomLabels();
     installCodexApiLogoutMenuItem();
     installCodexApiLogoutMenuWatcher();
     scheduleBackendHeartbeat();
@@ -9310,6 +9549,8 @@
 
   function scheduleScan(mutations) {
     schedulePluginAutoExpand();
+    runScanStep(localizeCodexPluginMarketplace);
+    runScanStep(localizeCodexStandaloneCustomLabels);
     if (!shouldScheduleScan(mutations)) return;
     window.__codexSessionDeletePendingMutations = window.__codexSessionDeletePendingMutations || [];
     window.__codexSessionDeletePendingMutations.push(...mutations);

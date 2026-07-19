@@ -7,6 +7,7 @@ use anyhow::{Context, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use uuid::Uuid;
 use zip::ZipArchive;
 
 const THEME_SCHEMA_VERSION: u32 = 3;
@@ -31,6 +32,8 @@ const SAGE_PAPER_WALLPAPER_BYTES: &[u8] =
     include_bytes!("../../../assets/theme-studio/sage-paper-wallpaper.webp");
 const ENFP_DOODLE_WALLPAPER_BYTES: &[u8] =
     include_bytes!("../../../assets/theme-studio/enfp-doodle-wallpaper.webp");
+const ENFP_DOODLE_WALLPAPER_V2_1_BYTES: &[u8] =
+    include_bytes!("../../../assets/theme-studio/enfp-doodle-wallpaper-v2-1.webp");
 const BUTTERFLY_COSMOS_WALLPAPER_BYTES: &[u8] =
     include_bytes!("../../../assets/theme-studio/butterfly-cosmos-wallpaper.webp");
 const CYAN_VIRTUAL_STAGE_WALLPAPER_BYTES: &[u8] =
@@ -173,6 +176,13 @@ pub struct ThemeStudioPayload {
     pub package_format: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThemeTitleBarTextColor {
+    Default,
+    Black,
+    White,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ThemePackageManifest {
@@ -240,6 +250,7 @@ pub struct ThemeStudioManager {
     root: PathBuf,
     settings_path: PathBuf,
     legacy_settings_path: PathBuf,
+    assets_path: PathBuf,
 }
 
 impl Default for ThemeStudioManager {
@@ -253,6 +264,7 @@ impl ThemeStudioManager {
         Self {
             settings_path: root.join("themes-v3.json"),
             legacy_settings_path: root.join("themes.json"),
+            assets_path: root.join("assets"),
             root,
         }
     }
@@ -271,9 +283,15 @@ impl ThemeStudioManager {
         };
         let text = fs::read_to_string(source_path)
             .with_context(|| format!("failed to read theme settings {}", source_path.display()))?;
-        let settings = serde_json::from_str::<ThemeStudioSettings>(&text)
+        let mut settings = serde_json::from_str::<ThemeStudioSettings>(&text)
             .with_context(|| format!("failed to parse theme settings {}", source_path.display()))?;
-        normalize_settings(settings)
+        let had_embedded_images = settings_contain_embedded_images(&settings);
+        self.hydrate_theme_assets(&mut settings)?;
+        let settings = normalize_settings(settings)?;
+        if had_embedded_images {
+            let _ = self.persist_normalized_settings(&settings);
+        }
+        Ok(settings)
     }
 
     pub fn payload(&self) -> ThemeStudioPayload {
@@ -286,10 +304,7 @@ impl ThemeStudioManager {
 
     pub fn save(&self, settings: ThemeStudioSettings) -> anyhow::Result<ThemeStudioSettings> {
         let settings = normalize_settings(settings)?;
-        fs::create_dir_all(&self.root)
-            .with_context(|| format!("failed to create theme directory {}", self.root.display()))?;
-        let bytes = serde_json::to_vec_pretty(&settings)?;
-        crate::settings::atomic_write(&self.settings_path, &bytes)?;
+        self.persist_normalized_settings(&settings)?;
         Ok(settings)
     }
 
@@ -330,7 +345,22 @@ impl ThemeStudioManager {
             bail!("theme package exceeds 12 MB");
         }
         let imported = read_theme_package(&bytes)?;
+        self.install_theme(imported)
+    }
+
+    pub fn install_theme(&self, imported: ThemeDefinition) -> anyhow::Result<ThemeStudioSettings> {
+        let imported = normalize_theme(imported)?;
+        if imported.builtin {
+            bail!("installed themes cannot be marked as built-in");
+        }
         let mut settings = self.try_load()?;
+        if settings
+            .themes
+            .iter()
+            .any(|theme| theme.id == imported.id && theme.builtin)
+        {
+            bail!("installed theme id conflicts with a built-in theme");
+        }
         if let Some(position) = settings
             .themes
             .iter()
@@ -354,9 +384,228 @@ impl ThemeStudioManager {
         self.save(settings)
     }
 
+    pub fn state_root(&self) -> &Path {
+        &self.root
+    }
+
     pub fn build_runtime_bundle(&self) -> anyhow::Result<String> {
         build_runtime_bundle(&self.try_load()?)
     }
+
+    pub fn title_bar_text_color(&self) -> ThemeTitleBarTextColor {
+        theme_title_bar_text_color(&self.load())
+    }
+
+    fn hydrate_theme_assets(&self, settings: &mut ThemeStudioSettings) -> anyhow::Result<()> {
+        for theme in &mut settings.themes {
+            let theme_id = match normalize_identifier(&theme.id) {
+                Ok(theme_id) => theme_id,
+                Err(_) => continue,
+            };
+            hydrate_asset_data_url(
+                &self.assets_path,
+                &theme_id,
+                "wallpaper",
+                &mut theme.wallpaper_data_url,
+            )?;
+            hydrate_asset_data_url(
+                &self.assets_path,
+                &theme_id,
+                "hero",
+                &mut theme.showcase.hero_image_data_url,
+            )?;
+            hydrate_asset_data_url(
+                &self.assets_path,
+                &theme_id,
+                "portrait",
+                &mut theme.showcase.portrait_image_data_url,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn persist_normalized_settings(&self, settings: &ThemeStudioSettings) -> anyhow::Result<()> {
+        fs::create_dir_all(&self.root)
+            .with_context(|| format!("failed to create theme directory {}", self.root.display()))?;
+
+        let transaction_id = Uuid::new_v4();
+        let staging_path = self.root.join(format!(".assets-staging-{transaction_id}"));
+        let backup_path = self.root.join(format!(".assets-backup-{transaction_id}"));
+        fs::create_dir_all(&staging_path).with_context(|| {
+            format!(
+                "failed to create theme asset staging directory {}",
+                staging_path.display()
+            )
+        })?;
+
+        let mut stored_settings = settings.clone();
+        let prepare_result = (|| -> anyhow::Result<()> {
+            for theme in &mut stored_settings.themes {
+                persist_asset_data_url(
+                    &staging_path,
+                    &theme.id,
+                    "wallpaper",
+                    &theme.wallpaper_data_url,
+                )?;
+                persist_asset_data_url(
+                    &staging_path,
+                    &theme.id,
+                    "hero",
+                    &theme.showcase.hero_image_data_url,
+                )?;
+                persist_asset_data_url(
+                    &staging_path,
+                    &theme.id,
+                    "portrait",
+                    &theme.showcase.portrait_image_data_url,
+                )?;
+                theme.wallpaper_data_url.clear();
+                theme.showcase.hero_image_data_url.clear();
+                theme.showcase.portrait_image_data_url.clear();
+            }
+            Ok(())
+        })();
+        if let Err(error) = prepare_result {
+            let _ = fs::remove_dir_all(&staging_path);
+            return Err(error);
+        }
+        let bytes = match serde_json::to_vec_pretty(&stored_settings) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                let _ = fs::remove_dir_all(&staging_path);
+                return Err(error.into());
+            }
+        };
+
+        if self.assets_path.exists() {
+            if !self.assets_path.is_dir() {
+                let _ = fs::remove_dir_all(&staging_path);
+                bail!(
+                    "theme asset path is not a directory: {}",
+                    self.assets_path.display()
+                );
+            }
+            if let Err(error) = fs::rename(&self.assets_path, &backup_path) {
+                let _ = fs::remove_dir_all(&staging_path);
+                return Err(error).with_context(|| {
+                    format!(
+                        "failed to back up theme assets {}",
+                        self.assets_path.display()
+                    )
+                });
+            }
+        }
+
+        if let Err(error) = fs::rename(&staging_path, &self.assets_path) {
+            if backup_path.exists() {
+                let _ = fs::rename(&backup_path, &self.assets_path);
+            }
+            let _ = fs::remove_dir_all(&staging_path);
+            return Err(error).with_context(|| {
+                format!(
+                    "failed to activate theme assets {}",
+                    self.assets_path.display()
+                )
+            });
+        }
+
+        if let Err(error) = crate::settings::atomic_write(&self.settings_path, &bytes) {
+            let _ = fs::remove_dir_all(&self.assets_path);
+            if backup_path.exists() {
+                let _ = fs::rename(&backup_path, &self.assets_path);
+            }
+            return Err(error).context("failed to persist theme settings");
+        }
+
+        if backup_path.exists() {
+            let _ = fs::remove_dir_all(backup_path);
+        }
+        Ok(())
+    }
+}
+
+fn settings_contain_embedded_images(settings: &ThemeStudioSettings) -> bool {
+    settings.themes.iter().any(|theme| {
+        !theme.wallpaper_data_url.is_empty()
+            || !theme.showcase.hero_image_data_url.is_empty()
+            || !theme.showcase.portrait_image_data_url.is_empty()
+    })
+}
+
+fn persist_asset_data_url(
+    assets_root: &Path,
+    theme_id: &str,
+    slot: &str,
+    value: &str,
+) -> anyhow::Result<()> {
+    if value.is_empty() {
+        return Ok(());
+    }
+    let theme_id = normalize_identifier(theme_id)?;
+    let (extension, bytes) = decode_image_data_url(value)?;
+    let theme_dir = assets_root.join(theme_id);
+    fs::create_dir_all(&theme_dir).with_context(|| {
+        format!(
+            "failed to create theme asset directory {}",
+            theme_dir.display()
+        )
+    })?;
+    crate::settings::atomic_write(&theme_dir.join(format!("{slot}.{extension}")), &bytes)
+}
+
+fn hydrate_asset_data_url(
+    assets_root: &Path,
+    theme_id: &str,
+    slot: &str,
+    value: &mut String,
+) -> anyhow::Result<()> {
+    if !value.is_empty() {
+        return Ok(());
+    }
+    let theme_dir = assets_root.join(theme_id);
+    for (extension, mime) in [
+        ("png", "image/png"),
+        ("jpg", "image/jpeg"),
+        ("webp", "image/webp"),
+        ("svg", "image/svg+xml"),
+    ] {
+        let path = theme_dir.join(format!("{slot}.{extension}"));
+        if !path.is_file() {
+            continue;
+        }
+        let metadata = fs::metadata(&path)
+            .with_context(|| format!("failed to inspect theme asset {}", path.display()))?;
+        if metadata.len() > MAX_IMAGE_BYTES as u64 {
+            bail!("theme asset exceeds 8 MB: {}", path.display());
+        }
+        let bytes = fs::read(&path)
+            .with_context(|| format!("failed to read theme asset {}", path.display()))?;
+        *value = format!("data:{mime};base64,{}", STANDARD.encode(bytes));
+        return Ok(());
+    }
+    Ok(())
+}
+
+fn decode_image_data_url(value: &str) -> anyhow::Result<(&'static str, Vec<u8>)> {
+    let formats = [
+        ("data:image/png;base64,", "png"),
+        ("data:image/jpeg;base64,", "jpg"),
+        ("data:image/webp;base64,", "webp"),
+        ("data:image/svg+xml;base64,", "svg"),
+    ];
+    let Some((prefix, extension)) = formats
+        .iter()
+        .find(|(prefix, _)| value.starts_with(*prefix))
+    else {
+        bail!("theme image must be a local PNG, JPEG or WebP image");
+    };
+    let bytes = STANDARD
+        .decode(&value[prefix.len()..])
+        .context("theme image data is not valid base64")?;
+    if bytes.len() > MAX_IMAGE_BYTES {
+        bail!("theme image exceeds 8 MB");
+    }
+    Ok((extension, bytes))
 }
 
 impl Default for ThemeStudioSettings {
@@ -718,10 +967,10 @@ fn themed_cards(theme_id: &str) -> Vec<ThemeShowcaseCard> {
             "找到根因再动手修复。请复现问题、实施最小可靠修复并完成回归验证。",
         ],
         "enfp-doodle" => [
-            "一次发散出更多可能。请围绕当前项目快速脑暴，并筛选最值得立即实现的方向。",
-            "先做出能跑的第一版。请用最小完整范围完成原型，并标明后续扩展点。",
-            "边体验边把细节改顺。请运行当前功能，持续验证并改进交互与实现。",
-            "把恼人的 Bug 彻底解决。请定位根因、完成修复并补上防回归测试。",
+            "把脑子里的一万种可能都倒出来！请围绕当前项目快速脑暴，按价值、可行性和新鲜度筛选最值得立即实现的方向。",
+            "想法不等人，先跑起来再说！请用最小完整范围做出可运行原型，完成关键流程验证并标明后续扩展点。",
+            "改到爽为止，体验即正义！请运行并体验当前功能，边验证边改进交互、反馈、边界条件和实现质量。",
+            "Bug 不可怕，把它变成段子吧！请稳定复现问题、定位根因、完成修复并补上防回归测试。",
         ],
         "ink-night" => [
             "绘制项目的代码星图。请梳理核心模块、调用链和高风险区域，指出最佳切入点。",
@@ -776,9 +1025,9 @@ fn concept_showcase(theme_id: &str) -> ThemeShowcase {
             "让思路在纸张与叶影中沉淀，再把它写成可靠代码。",
         ),
         "enfp-doodle" => (
-            "ENFP 灵感模式 · Codex Compass",
+            "ENFP · 灵感发动机已启动 ♥",
             "先有灵感，再把它变成真的",
-            "脑暴、试错、快速原型，最后都能落地。",
+            "ENFP 模式：脑暴、试错、灵感乱飞，但最后都能落地。",
         ),
         "ink-night" => (
             "蝶光星河 · Codex Compass",
@@ -882,7 +1131,7 @@ fn concept_theme(
 }
 
 fn builtin_themes() -> Vec<ThemeDefinition> {
-    vec![
+    let mut themes = vec![
         concept_theme(
             "rose-garden",
             "玫瑰灵感",
@@ -989,17 +1238,17 @@ fn builtin_themes() -> Vec<ThemeDefinition> {
                 "doodle",
                 "outline",
                 "doodles",
-                "ENERGY 100%",
+                "好点子 +99",
                 "far-right",
-                84,
-                6,
+                88,
+                5,
                 "ambient",
             ),
             [
-                "#12a890", "#c8f1e9", "#fffdf3", "#fffefa", "#edf9f5", "#202d2a", "#677a75",
-                "#b9ddd5",
+                "#12a890", "#d3f3ea", "#fff9e9", "#fffef8", "#eefaf6", "#24302d", "#687b76",
+                "#b7ddd4",
             ],
-            [96, 95, 52, 10],
+            [97, 95, 58, 10],
             8,
             "system",
         ),
@@ -1075,7 +1324,53 @@ fn builtin_themes() -> Vec<ThemeDefinition> {
             8,
             "serif",
         ),
-    ]
+    ];
+    if let Some(theme) = themes.iter_mut().find(|theme| theme.id == "enfp-doodle") {
+        theme.version = "2.2.0".to_string();
+    }
+    themes
+}
+
+fn legacy_enfp_cards_v2_1() -> Vec<ThemeShowcaseCard> {
+    let titles = ["灵感脑暴", "快速原型", "边玩边改", "欢乐修 Bug"];
+    let prompts = [
+        "一次发散出更多可能。请围绕当前项目快速脑暴，并筛选最值得立即实现的方向。",
+        "先做出能跑的第一版。请用最小完整范围完成原型，并标明后续扩展点。",
+        "边体验边把细节改顺。请运行当前功能，持续验证并改进交互与实现。",
+        "把恼人的 Bug 彻底解决。请定位根因、完成修复并补上防回归测试。",
+    ];
+    let icons = ["code", "build", "review", "repair"];
+    (0..4)
+        .map(|index| ThemeShowcaseCard {
+            title: titles[index].to_string(),
+            prompt: prompts[index].to_string(),
+            icon: icons[index].to_string(),
+        })
+        .collect()
+}
+
+fn legacy_builtin_themes_v3_1() -> Vec<ThemeDefinition> {
+    let mut themes = builtin_themes();
+    if let Some(theme) = themes.iter_mut().find(|theme| theme.id == "enfp-doodle") {
+        theme.version = "2.1.0".to_string();
+        theme.wallpaper_data_url = builtin_asset(ENFP_DOODLE_WALLPAPER_V2_1_BYTES);
+        theme.showcase.eyebrow = "ENFP 灵感模式 · Codex Compass".to_string();
+        theme.showcase.subtitle = "脑暴、试错、快速原型，最后都能落地。".to_string();
+        theme.showcase.cards = legacy_enfp_cards_v2_1();
+        theme.presentation.header_badge = "ENERGY 100%".to_string();
+        theme.presentation.overlay_strength = 84;
+        theme.presentation.task_wallpaper_opacity = 6;
+        theme.visual.accent_soft = "#c8f1e9".to_string();
+        theme.visual.background = "#fffdf3".to_string();
+        theme.visual.surface = "#fffefa".to_string();
+        theme.visual.surface_alt = "#edf9f5".to_string();
+        theme.visual.text = "#202d2a".to_string();
+        theme.visual.text_muted = "#677a75".to_string();
+        theme.visual.border = "#b9ddd5".to_string();
+        theme.visual.sidebar_opacity = 96;
+        theme.visual.wallpaper_opacity = 52;
+    }
+    themes
 }
 
 fn legacy_themed_cards_v3(theme_id: &str) -> Vec<ThemeShowcaseCard> {
@@ -1261,16 +1556,22 @@ fn normalize_settings(mut settings: ThemeStudioSettings) -> anyhow::Result<Theme
     let mut normalized = Vec::with_capacity(settings.themes.len() + 8);
     let builtin_defaults = builtin_themes();
     let legacy_v3_defaults = legacy_builtin_themes_v3();
+    let legacy_v3_1_defaults = legacy_builtin_themes_v3_1();
     for theme in settings.themes {
         let theme = if theme.builtin {
-            let old_default = legacy_v3_defaults
+            let old_default = legacy_v3_1_defaults
                 .iter()
-                .find(|default| default.id == theme.id);
+                .find(|default| default.id == theme.id && default.version == theme.version)
+                .or_else(|| {
+                    legacy_v3_defaults
+                        .iter()
+                        .find(|default| default.id == theme.id && default.version == theme.version)
+                });
             let new_default = builtin_defaults
                 .iter()
                 .find(|default| default.id == theme.id);
             match (old_default, new_default) {
-                (Some(old_default), Some(new_default)) if theme.version == old_default.version => {
+                (Some(old_default), Some(new_default)) => {
                     merge_builtin_theme(theme, old_default, new_default)
                 }
                 _ => theme,
@@ -1720,6 +2021,58 @@ fn normalize_color(value: &str) -> anyhow::Result<String> {
     Ok(trimmed)
 }
 
+fn theme_title_bar_text_color(settings: &ThemeStudioSettings) -> ThemeTitleBarTextColor {
+    if !settings.enabled {
+        return ThemeTitleBarTextColor::Default;
+    }
+    let Some(theme) = settings
+        .themes
+        .iter()
+        .find(|theme| theme.id == settings.selected_theme_id)
+        .or_else(|| settings.themes.first())
+    else {
+        return ThemeTitleBarTextColor::Default;
+    };
+    // Prefer the window background, but fall back to the surface color when the
+    // background is empty or unparseable. As a last resort, infer brightness from
+    // the text color (dark text implies a light window, and vice versa) so the
+    // native title-bar buttons never get stranded on the theme's system default.
+    if let Some(rgb) = parse_theme_rgb(&theme.visual.background) {
+        return title_bar_color_for_luminance(rgb_luminance(rgb));
+    }
+    if let Some(rgb) = parse_theme_rgb(&theme.visual.surface) {
+        return title_bar_color_for_luminance(rgb_luminance(rgb));
+    }
+    if let Some(rgb) = parse_theme_rgb(&theme.visual.text) {
+        return title_bar_color_for_luminance(1.0 - rgb_luminance(rgb));
+    }
+    ThemeTitleBarTextColor::Default
+}
+
+fn rgb_luminance((red, green, blue): (u8, u8, u8)) -> f64 {
+    (0.2126 * f64::from(red) + 0.7152 * f64::from(green) + 0.0722 * f64::from(blue)) / 255.0
+}
+
+fn title_bar_color_for_luminance(luminance: f64) -> ThemeTitleBarTextColor {
+    if luminance < 0.46 {
+        ThemeTitleBarTextColor::White
+    } else {
+        ThemeTitleBarTextColor::Black
+    }
+}
+
+fn parse_theme_rgb(value: &str) -> Option<(u8, u8, u8)> {
+    let hex = value.trim().strip_prefix('#')?;
+    if hex.len() < 6 {
+        return None;
+    }
+    Some((
+        u8::from_str_radix(&hex[0..2], 16).ok()?,
+        u8::from_str_radix(&hex[2..4], 16).ok()?,
+        u8::from_str_radix(&hex[4..6], 16).ok()?,
+    ))
+}
+
 fn normalize_decorative_style(value: &str) -> String {
     match value {
         "botanical" | "leaves" | "constellation" | "manuscript" | "none" => value.to_string(),
@@ -1937,28 +2290,56 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
   const showcaseHomeClass = "cc-theme-showcase-home";
   const showcaseComposerClass = "cc-theme-showcase-composer";
   const shellSidebarClass = "cc-theme-shell-sidebar";
+  const shellSidebarStaticClass = "cc-theme-shell-sidebar-static";
+  const shellAccountStaticClass = "cc-theme-shell-account-static";
   const shellTopbarClass = "cc-theme-shell-topbar";
   const shellSessionbarClass = "cc-theme-shell-sessionbar";
   const shellComposerClass = "cc-theme-shell-composer";
-  const shellClassNames = [
+  const projectContextMenuSelector = '[data-codex-theme-project-context-menu="true"]';
+  const projectRenameDialogSelector = '[data-codex-theme-project-rename-dialog="true"]';
+  const shellSidebarClassNames = [
     shellSidebarClass,
-    shellTopbarClass,
-    shellSessionbarClass,
-    shellComposerClass,
+    shellSidebarStaticClass,
+    shellAccountStaticClass,
     "cc-theme-shell-product-button",
+    "cc-theme-shell-search-button",
     "cc-theme-shell-new-task",
     "cc-theme-shell-nav-row",
+    "cc-theme-shell-nav-coral",
+    "cc-theme-shell-nav-mint",
+    "cc-theme-shell-nav-sky",
+    "cc-theme-shell-nav-violet",
     "cc-theme-shell-project-row",
     "cc-theme-shell-thread-row",
     "cc-theme-shell-active-row",
     "cc-theme-shell-group-heading",
     "cc-theme-shell-account-row",
+  ];
+  const shellClassNames = [
+    ...shellSidebarClassNames,
+    shellTopbarClass,
+    shellSessionbarClass,
+    shellComposerClass,
     "cc-theme-shell-model-button",
     "cc-theme-shell-send-button",
     "cc-theme-shell-stop-button",
     "cc-theme-shell-attach-button",
+    "cc-theme-shell-window-control",
+    "cc-theme-shell-window-minimize",
+    "cc-theme-shell-window-maximize",
+    "cc-theme-shell-window-close",
   ];
   const shellInjectedSelector = "[data-codex-theme-shell-injected]";
+  function clearSidebarDecorations() {{
+    document.querySelectorAll('[data-codex-theme-shell-injected="brand"]').forEach((node) => node.remove());
+    shellSidebarClassNames.forEach((className) => {{
+      document.querySelectorAll(`.${{className}}`).forEach((node) => {{
+        node.classList.remove(className);
+        delete node.dataset.ccThemeLabel;
+        delete node.dataset.ccThemeMark;
+      }});
+    }});
+  }}
   function clearShellDom() {{
     document.querySelectorAll(shellInjectedSelector).forEach((node) => node.remove());
     shellClassNames.forEach((className) => {{
@@ -1967,6 +2348,21 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
         delete node.dataset.ccThemeLabel;
         delete node.dataset.ccThemeMark;
       }});
+    }});
+    document.querySelectorAll(projectContextMenuSelector).forEach((node) => {{
+      delete node.dataset.codexThemeProjectContextMenu;
+      delete node.dataset.codexThemeProjectContextMenuVersion;
+    }});
+    document.querySelectorAll('[data-codex-theme-project-menu-action]').forEach((node) => {{
+      delete node.dataset.codexThemeProjectMenuAction;
+    }});
+    document.querySelectorAll(projectRenameDialogSelector).forEach((node) => {{
+      delete node.dataset.codexThemeProjectRenameDialog;
+    }});
+    document.querySelectorAll('[data-codex-theme-project-rename-field], [data-codex-theme-project-rename-action], [data-codex-theme-project-rename-actions]').forEach((node) => {{
+      delete node.dataset.codexThemeProjectRenameField;
+      delete node.dataset.codexThemeProjectRenameAction;
+      delete node.dataset.codexThemeProjectRenameActions;
     }});
     delete document.documentElement.dataset.codexCompassThemeShell;
   }}
@@ -2029,6 +2425,90 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
   const blue = backgroundNumber & 255;
   const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
   const colorScheme = luminance < 0.46 ? "dark" : "light";
+  let codexAppActionsPromise = null;
+  let appearanceSyncTimer = 0;
+  let appearanceSyncInFlight = false;
+  let appearanceRetryCount = 0;
+  function appActionModuleCandidates() {{
+    const candidates = new Set();
+    const add = (value) => {{
+      if (!value) return;
+      try {{
+        const url = new URL(value, location.href);
+        if (/\/assets\/rpc-[^/]+\.js$/.test(url.pathname)) candidates.add(`.${{url.pathname}}`);
+      }} catch (_) {{}}
+    }};
+    document.querySelectorAll("script[src],link[href]").forEach((node) => {{
+      add(node.getAttribute("src") || node.getAttribute("href"));
+    }});
+    (performance.getEntriesByType?.("resource") || []).forEach((entry) => add(entry.name));
+    return Array.from(candidates);
+  }}
+  async function getCodexAppActions() {{
+    const injectedAppActions = window.__codexCompassThemeAppActions;
+    if (typeof injectedAppActions?.runInPrimaryWindow === "function") return injectedAppActions;
+    if (!codexAppActionsPromise) {{
+      codexAppActionsPromise = (async () => {{
+        const errors = [];
+        for (const candidate of appActionModuleCandidates()) {{
+          try {{
+            const module = await import(candidate);
+            const appActions = module?.n?.appActions || module?.appServices?.appActions;
+            if (typeof appActions?.runInPrimaryWindow === "function") return appActions;
+            errors.push(`${{candidate}}: missing appActions`);
+          }} catch (error) {{
+            errors.push(`${{candidate}}: ${{error?.message || error}}`);
+          }}
+        }}
+        throw new Error(`Codex app actions unavailable (${{errors.join("; ")}})`);
+      }})();
+    }}
+    try {{
+      return await codexAppActionsPromise;
+    }} catch (error) {{
+      codexAppActionsPromise = null;
+      throw error;
+    }}
+  }}
+  function explicitCodexAppearanceMode() {{
+    const tokens = [
+      document.documentElement.className,
+      document.documentElement.getAttribute("data-theme"),
+      document.documentElement.getAttribute("color-scheme"),
+      document.body?.className,
+      document.body?.getAttribute("data-theme"),
+    ].filter(Boolean).join(" ");
+    if (/\b(?:electron-dark|theme-dark|dark)\b/i.test(tokens)) return "dark";
+    if (/\b(?:electron-light|theme-light|light)\b/i.test(tokens)) return "light";
+    return "";
+  }}
+  async function forceCodexAppearanceMode() {{
+    if (appearanceSyncInFlight || explicitCodexAppearanceMode() === colorScheme) return;
+    appearanceSyncInFlight = true;
+    try {{
+      const appActions = await getCodexAppActions();
+      await appActions.runInPrimaryWindow({{
+        action: {{ type: "app.appearance.set_mode", mode: colorScheme }},
+      }});
+      appearanceRetryCount = 0;
+    }} catch (error) {{
+      appearanceRetryCount += 1;
+      if (appearanceRetryCount >= 4) {{
+        console.warn("[Codex Compass Theme] Failed to synchronize Codex appearance", error);
+      }} else {{
+        scheduleAppearanceSync(appearanceRetryCount * 500);
+      }}
+    }} finally {{
+      appearanceSyncInFlight = false;
+    }}
+  }}
+  function scheduleAppearanceSync(delay = 80) {{
+    if (appearanceSyncTimer) window.clearTimeout(appearanceSyncTimer);
+    appearanceSyncTimer = window.setTimeout(() => {{
+      appearanceSyncTimer = 0;
+      forceCodexAppearanceMode();
+    }}, delay);
+  }}
   const accentHex = String(v.accent || "#000000").slice(1, 7);
   const accentNumber = Number.parseInt(accentHex, 16);
   const accentRed = (accentNumber >> 16) & 255;
@@ -2208,7 +2688,6 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
       backdrop-filter: blur(var(--cc-theme-blur)) !important;
     }}
     .cc-theme-shell-sidebar {{
-      position: relative !important;
       isolation: isolate;
       overflow: hidden !important;
       border-right: 1px solid color-mix(in srgb, var(--cc-theme-accent) 22%, var(--cc-theme-border)) !important;
@@ -2218,6 +2697,9 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
           color-mix(in srgb, var(--cc-theme-bg) ${{Math.max(78, v.sidebarOpacity - 5)}}%, transparent)) !important;
       box-shadow: 10px 0 34px color-mix(in srgb, var(--cc-theme-text) 7%, transparent);
       backdrop-filter: blur(max(14px, var(--cc-theme-blur))) saturate(1.08) !important;
+    }}
+    .cc-theme-shell-sidebar-static {{
+      position: relative !important;
     }}
     .cc-theme-shell-sidebar::before {{
       content: "";
@@ -2290,6 +2772,17 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
       text-overflow: ellipsis;
       white-space: nowrap;
     }}
+    .cc-theme-shell-search-button {{
+      z-index: 5 !important;
+      color: color-mix(in srgb, var(--cc-theme-accent) 86%, var(--cc-theme-text)) !important;
+      border-color: transparent !important;
+      background: transparent !important;
+      box-shadow: none !important;
+    }}
+    .cc-theme-shell-search-button:hover {{
+      color: var(--cc-theme-accent) !important;
+      background: color-mix(in srgb, var(--cc-theme-accent-soft) 72%, transparent) !important;
+    }}
     .cc-theme-shell-new-task {{
       min-height: 38px !important;
       color: ${{onAccent}} !important;
@@ -2320,7 +2813,8 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
       min-height: 30px !important;
       max-height: 32px !important;
       margin-block: 0 !important;
-      padding-block: 2px !important;
+      padding-block: 0 !important;
+      overflow: clip !important;
       border-radius: 6px !important;
       font-size: 12px !important;
       line-height: 1.25 !important;
@@ -2363,6 +2857,18 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
       color: color-mix(in srgb, var(--cc-theme-accent) 82%, var(--cc-theme-text)) !important;
       filter: drop-shadow(0 2px 4px color-mix(in srgb, var(--cc-theme-accent) 12%, transparent));
     }}
+    .cc-theme-shell-nav-coral svg {{
+      color: #ef765d !important;
+    }}
+    .cc-theme-shell-nav-mint svg {{
+      color: #12a890 !important;
+    }}
+    .cc-theme-shell-nav-sky svg {{
+      color: #37a9dc !important;
+    }}
+    .cc-theme-shell-nav-violet svg {{
+      color: #8a6fd1 !important;
+    }}
     .cc-theme-shell-active-row {{
       color: var(--cc-theme-text) !important;
       border-color: color-mix(in srgb, var(--cc-theme-accent) 28%, var(--cc-theme-border)) !important;
@@ -2385,6 +2891,9 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
     .cc-theme-shell-account-row {{
       border-color: color-mix(in srgb, var(--cc-theme-accent) 20%, var(--cc-theme-border)) !important;
       background: color-mix(in srgb, var(--cc-theme-surface-alt) 58%, transparent) !important;
+    }}
+    .cc-theme-shell-account-static {{
+      position: relative !important;
     }}
     .cc-theme-shell-topbar {{
       position: relative !important;
@@ -2444,12 +2953,244 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
     }}
     [role="dialog"],
     [role="menu"],
-    [data-slot="popover-content"] {{
+    [role="listbox"],
+    [data-slot="dialog-content"],
+    [data-slot="alert-dialog-content"],
+    [data-slot="popover-content"],
+    [data-slot="dropdown-menu-content"],
+    [data-slot="context-menu-content"],
+    [data-slot="command"],
+    [data-radix-menu-content],
+    [data-radix-popover-content] {{
+      position: relative;
+      z-index: 2147483001 !important;
+      isolation: isolate;
       color: var(--cc-theme-text) !important;
-      background: color-mix(in srgb, var(--cc-theme-surface) 94%, transparent) !important;
+      background: var(--cc-theme-surface) !important;
       border-color: var(--cc-theme-border) !important;
       border-radius: var(--cc-theme-radius) !important;
-      backdrop-filter: blur(var(--cc-theme-blur)) !important;
+      box-shadow: 0 18px 54px color-mix(in srgb, var(--cc-theme-text) 18%, transparent) !important;
+      backdrop-filter: none !important;
+      opacity: 1 !important;
+    }}
+    html[data-codex-compass-theme] [role="dialog"][aria-label="图片预览"],
+    html[data-codex-compass-theme] [role="dialog"][aria-label="Image preview"] {{
+      position: fixed !important;
+      inset: 0 !important;
+      width: 100vw !important;
+      height: 100dvh !important;
+      z-index: 2147483001 !important;
+      isolation: auto;
+      color: inherit !important;
+      background: transparent !important;
+      border: 0 !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+      backdrop-filter: none !important;
+      transform: none !important;
+      opacity: 1 !important;
+    }}
+    [data-slot="dialog-overlay"],
+    [data-slot="alert-dialog-overlay"],
+    [data-radix-dialog-overlay],
+    [data-radix-alert-dialog-overlay] {{
+      z-index: 2147483000 !important;
+      background: color-mix(in srgb, var(--cc-theme-text) 34%, transparent) !important;
+      backdrop-filter: none !important;
+      opacity: 1 !important;
+    }}
+    [role="dialog"] aside,
+    [role="dialog"] nav,
+    [data-slot="dialog-content"] aside,
+    [data-slot="dialog-content"] nav {{
+      color: var(--cc-theme-text) !important;
+      background: var(--cc-theme-surface-alt) !important;
+      border-color: var(--cc-theme-border) !important;
+      backdrop-filter: none !important;
+      opacity: 1 !important;
+    }}
+    html[data-codex-compass-theme] [role="dialog"] [data-slot="content"],
+    html[data-codex-compass-theme] [role="dialog"] [class*="content"],
+    html[data-codex-compass-theme] [role="dialog"] [class*="Content"],
+    html[data-codex-compass-theme] [data-slot="dialog-content"] [data-slot="content"],
+    html[data-codex-compass-theme] [data-slot="dialog-content"] [class*="content"],
+    html[data-codex-compass-theme] [data-slot="dialog-content"] [class*="Content"] {{
+      color: var(--cc-theme-text) !important;
+      background-color: var(--cc-theme-surface) !important;
+      backdrop-filter: none !important;
+      opacity: 1 !important;
+    }}
+    [role="dialog"] input:not([type="checkbox"]):not([type="radio"]),
+    [role="dialog"] textarea,
+    [role="dialog"] [contenteditable="true"],
+    [role="dialog"] [role="combobox"],
+    [data-slot="dialog-content"] input:not([type="checkbox"]):not([type="radio"]),
+    [data-slot="dialog-content"] textarea,
+    [data-slot="dialog-content"] [contenteditable="true"],
+    [data-slot="dialog-content"] [role="combobox"] {{
+      color: var(--cc-theme-text) !important;
+      background: var(--cc-theme-surface-alt) !important;
+      border-color: var(--cc-theme-border) !important;
+      backdrop-filter: none !important;
+      opacity: 1 !important;
+    }}
+    [role="switch"],
+    [data-slot="switch"] {{
+      color: var(--cc-theme-text) !important;
+      background: var(--cc-theme-surface-alt) !important;
+      border-color: var(--cc-theme-border) !important;
+      opacity: 1 !important;
+    }}
+    [role="switch"][aria-checked="true"],
+    [role="switch"][data-state="checked"],
+    [data-slot="switch"][data-state="checked"] {{
+      color: ${{onAccent}} !important;
+      background: color-mix(in srgb, var(--cc-theme-accent) 66%, var(--cc-theme-text)) !important;
+      border-color: var(--cc-theme-accent) !important;
+    }}
+    input[type="checkbox"],
+    input[type="radio"],
+    [role="checkbox"] {{
+      accent-color: var(--cc-theme-accent) !important;
+    }}
+    [role="menuitem"],
+    [role="option"],
+    [data-slot="command-item"] {{
+      color: var(--cc-theme-text) !important;
+    }}
+    [role="menuitem"]:hover,
+    [role="menuitem"][data-highlighted],
+    [role="option"]:hover,
+    [role="option"][data-highlighted],
+    [data-slot="command-item"]:hover,
+    [data-slot="command-item"][data-selected="true"] {{
+      color: var(--cc-theme-text) !important;
+      background: color-mix(in srgb, var(--cc-theme-accent-soft) 82%, var(--cc-theme-surface)) !important;
+    }}
+    html[data-codex-compass-theme] [data-codex-theme-project-context-menu="true"] {{
+      min-width: min(248px, calc(100vw - 24px)) !important;
+      padding: 6px !important;
+      color: var(--cc-theme-text) !important;
+      background: var(--cc-theme-surface) !important;
+      border: 1px solid var(--cc-theme-border) !important;
+      border-radius: 8px !important;
+      box-shadow: 0 16px 42px color-mix(in srgb, var(--cc-theme-text) 18%, transparent) !important;
+      opacity: 1 !important;
+      backdrop-filter: none !important;
+    }}
+    html[data-codex-compass-theme] [data-codex-theme-project-menu-action] {{
+      min-height: 38px !important;
+      padding: 7px 10px !important;
+      display: flex !important;
+      align-items: center !important;
+      gap: 10px !important;
+      color: var(--cc-theme-text) !important;
+      border-radius: 6px !important;
+      background: transparent !important;
+      opacity: 1 !important;
+    }}
+    html[data-codex-compass-theme] [data-codex-theme-project-menu-action] svg {{
+      width: 18px !important;
+      height: 18px !important;
+      flex: 0 0 18px !important;
+      color: var(--cc-theme-muted) !important;
+      stroke: currentColor !important;
+      opacity: 1 !important;
+    }}
+    html[data-codex-compass-theme] [data-codex-theme-project-menu-action]:is(:hover, :focus-visible, [data-highlighted]) {{
+      color: var(--cc-theme-text) !important;
+      background: color-mix(in srgb, var(--cc-theme-accent-soft) 82%, var(--cc-theme-surface)) !important;
+      outline: none !important;
+    }}
+    html[data-codex-compass-theme] [data-codex-theme-project-menu-action="archive"]:is(:hover, :focus-visible, [data-highlighted]) svg {{
+      color: var(--cc-theme-accent) !important;
+    }}
+    html[data-codex-compass-theme] [data-codex-theme-project-rename-dialog="true"] {{
+      position: fixed !important;
+      z-index: 2147483002 !important;
+      inset: auto !important;
+      top: 50% !important;
+      left: 50% !important;
+      right: auto !important;
+      bottom: auto !important;
+      transform: translate(-50%, -50%) !important;
+      width: min(520px, calc(100vw - 40px)) !important;
+      min-width: 0 !important;
+      max-width: 520px !important;
+      max-height: calc(100dvh - 40px) !important;
+      margin: 0 !important;
+      padding: 24px !important;
+      overflow: auto !important;
+      color: var(--cc-theme-text) !important;
+      background: var(--cc-theme-surface) !important;
+      border: 1px solid var(--cc-theme-border) !important;
+      border-radius: 8px !important;
+      box-shadow: 0 24px 72px color-mix(in srgb, var(--cc-theme-text) 24%, transparent) !important;
+      opacity: 1 !important;
+      backdrop-filter: none !important;
+      pointer-events: auto !important;
+    }}
+    html[data-codex-compass-theme] [data-codex-theme-project-rename-dialog="true"] [data-codex-theme-project-rename-field="true"] {{
+      width: 100% !important;
+      min-height: 44px !important;
+      margin-top: 16px !important;
+      padding: 9px 12px !important;
+      color: var(--cc-theme-text) !important;
+      background: var(--cc-theme-surface-alt) !important;
+      border: 1px solid var(--cc-theme-border) !important;
+      border-radius: 7px !important;
+      outline: none !important;
+      opacity: 1 !important;
+    }}
+    html[data-codex-compass-theme] [data-codex-theme-project-rename-dialog="true"] [data-codex-theme-project-rename-field="true"]:focus {{
+      border-color: var(--cc-theme-accent) !important;
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--cc-theme-accent) 18%, transparent) !important;
+    }}
+    html[data-codex-compass-theme] [data-codex-theme-project-rename-actions="true"] {{
+      display: flex !important;
+      align-items: center !important;
+      justify-content: flex-end !important;
+      flex-wrap: nowrap !important;
+      gap: 10px !important;
+      margin-top: 16px !important;
+    }}
+    html[data-codex-compass-theme] [data-codex-theme-project-rename-action] {{
+      min-width: 82px !important;
+      min-height: 38px !important;
+      padding: 7px 14px !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      border: 1px solid var(--cc-theme-border) !important;
+      border-radius: 7px !important;
+      color: var(--cc-theme-text) !important;
+      background: var(--cc-theme-surface-alt) !important;
+      opacity: 1 !important;
+    }}
+    html[data-codex-compass-theme] [data-codex-theme-project-rename-action="save"] {{
+      color: ${{onAccent}} !important;
+      background: var(--cc-theme-accent) !important;
+      border-color: var(--cc-theme-accent) !important;
+    }}
+    html[data-codex-compass-theme] [data-codex-theme-project-rename-action="close"] {{
+      position: absolute !important;
+      top: 12px !important;
+      right: 12px !important;
+      width: 32px !important;
+      min-width: 32px !important;
+      height: 32px !important;
+      min-height: 32px !important;
+      padding: 0 !important;
+      border: 0 !important;
+      border-radius: 6px !important;
+      background: transparent !important;
+      font-size: 18px !important;
+      line-height: 1 !important;
+    }}
+    html[data-codex-compass-theme] [data-codex-theme-project-rename-action="close"] svg {{
+      width: 18px !important;
+      height: 18px !important;
+      display: block !important;
     }}
     textarea,
     input,
@@ -2460,14 +3201,60 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
       border-color: var(--cc-theme-border) !important;
       border-radius: var(--cc-theme-radius) !important;
     }}
-    button,
-    [role="button"] {{
+    button:not(:where(
+      [role="dialog"][aria-label="图片预览"] *,
+      [role="dialog"][aria-label="Image preview"] *
+    )),
+    [role="button"]:not(:where(
+      [role="dialog"][aria-label="图片预览"] *,
+      [role="dialog"][aria-label="Image preview"] *
+    )) {{
       border-color: var(--cc-theme-border) !important;
       border-radius: min(var(--cc-theme-radius), 12px) !important;
     }}
-    button:hover,
-    [role="button"]:hover {{
+    button:not(:where(
+      [role="dialog"][aria-label="图片预览"] *,
+      [role="dialog"][aria-label="Image preview"] *
+    )):hover,
+    [role="button"]:not(:where(
+      [role="dialog"][aria-label="图片预览"] *,
+      [role="dialog"][aria-label="Image preview"] *
+    )):hover {{
       background-color: color-mix(in srgb, var(--cc-theme-accent-soft) 72%, transparent) !important;
+    }}
+    .cc-theme-shell-window-control {{
+      position: relative !important;
+      z-index: 2147482000 !important;
+      width: 28px !important;
+      min-width: 28px !important;
+      max-width: 28px !important;
+      min-height: 30px !important;
+      color: var(--cc-theme-text) !important;
+      border: 0 !important;
+      border-radius: 0 !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      opacity: 1 !important;
+      filter: none !important;
+      backdrop-filter: none !important;
+      pointer-events: auto !important;
+    }}
+    .cc-theme-shell-window-control svg,
+    .cc-theme-shell-window-control path,
+    .cc-theme-shell-window-control span {{
+      color: currentColor !important;
+      stroke: currentColor !important;
+      opacity: 1 !important;
+      filter: none !important;
+    }}
+    .cc-theme-shell-window-minimize:hover,
+    .cc-theme-shell-window-maximize:hover {{
+      color: var(--cc-theme-text) !important;
+      background: color-mix(in srgb, var(--cc-theme-accent-soft) 86%, var(--cc-theme-surface)) !important;
+    }}
+    .cc-theme-shell-window-close:hover {{
+      color: #ffffff !important;
+      background: #d92d20 !important;
     }}
     a, [data-state="active"], [aria-current="page"] {{
       color: var(--cc-theme-accent) !important;
@@ -2476,10 +3263,23 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
       border-color: var(--cc-theme-border) !important;
       background-color: var(--cc-theme-border) !important;
     }}
-    pre, code {{
+    pre,
+    code,
+    .monaco-editor,
+    .monaco-editor .margin,
+    .monaco-editor-background,
+    [data-slot="code-block"],
+    [data-testid*="code-block"],
+    [data-testid*="diff"],
+    [data-testid*="terminal"] {{
       color: var(--cc-theme-text) !important;
-      background-color: color-mix(in srgb, var(--cc-theme-surface-alt) 92%, transparent) !important;
+      background-color: var(--cc-theme-surface-alt) !important;
       border-color: var(--cc-theme-border) !important;
+      backdrop-filter: none !important;
+      opacity: 1 !important;
+    }}
+    pre code {{
+      background: transparent !important;
     }}
     .cc-theme-showcase-host {{
       position: relative !important;
@@ -3313,6 +4113,680 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
     .cc-theme-showcase.layout-doodle .cc-theme-showcase-card:nth-child(2) {{ border-color: #12a890 !important; }}
     .cc-theme-showcase.layout-doodle .cc-theme-showcase-card:nth-child(3) {{ border-color: #37a9dc !important; }}
     .cc-theme-showcase.layout-doodle .cc-theme-showcase-card:nth-child(4) {{ border-color: #efbd31 !important; }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-sidebar {{
+      border-right-color: color-mix(in srgb, #12a890 28%, #b7ddd4) !important;
+      background: #fffef8 !important;
+      box-shadow: 8px 0 24px color-mix(in srgb, #24302d 6%, transparent);
+      backdrop-filter: none !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-sidebar::before {{
+      background:
+        linear-gradient(145deg, color-mix(in srgb, #d3f3ea 30%, transparent), transparent 28%),
+        linear-gradient(18deg, transparent 88%, color-mix(in srgb, #f2c84b 12%, transparent) 88%);
+      opacity: .72;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-sidebar::after {{
+      display: none;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-product-button {{
+      min-height: 58px !important;
+      padding: 10px 42px 8px 14px !important;
+      color: #0f8f7c !important;
+      border-color: transparent !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif !important;
+      font-size: 26px !important;
+      font-weight: 850 !important;
+      letter-spacing: 0 !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-product-button::before {{
+      display: none;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-product-button::after {{
+      content: "✦";
+      left: auto;
+      right: 20px;
+      top: 13px;
+      bottom: auto;
+      width: auto;
+      color: #f2c84b;
+      overflow: visible;
+      font-size: 17px;
+      font-weight: 900;
+      line-height: 1;
+      text-shadow: 9px 8px 0 #f2c84b;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-search-button {{
+      color: #12a890 !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-search-button:hover {{
+      background: #e7f8f2 !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-new-task {{
+      min-height: 36px !important;
+      color: #26332f !important;
+      border-color: transparent !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      font-weight: 650 !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-new-task svg {{
+      color: #ffffff !important;
+      width: 21px !important;
+      height: 21px !important;
+      padding: 4px !important;
+      overflow: visible !important;
+      border-radius: 50% !important;
+      background: #ef765d !important;
+      box-shadow: 0 2px 6px color-mix(in srgb, #ef765d 22%, transparent);
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-new-task:hover {{
+      color: #26332f !important;
+      background: #fff0eb !important;
+      transform: none !important;
+      filter: none !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-nav-row {{
+      min-height: 34px !important;
+      color: #33433e !important;
+      font-size: 13px !important;
+      font-weight: 560 !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-nav-row:hover {{
+      border-color: transparent !important;
+      background: #f0faf6 !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-nav-row svg {{
+      filter: none !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-group-heading {{
+      margin-top: 12px !important;
+      padding: 8px 8px 4px 18px !important;
+      color: #0f907d !important;
+      border-top: 1px solid color-mix(in srgb, #12a890 13%, #d7e9e4) !important;
+      font-size: 11px !important;
+      font-weight: 760 !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-group-heading::before {{
+      content: "•";
+      position: absolute;
+      left: 7px;
+      top: 7px;
+      color: #12a890;
+      font-size: 14px;
+      line-height: 1;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-project-row {{
+      min-height: 31px !important;
+      color: #273a34 !important;
+      border-color: transparent !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      font-size: 12.5px !important;
+      font-weight: 680 !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-project-row svg {{
+      color: #12a890 !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-thread-row {{
+      position: relative !important;
+      min-height: 29px !important;
+      margin-left: 14px !important;
+      padding-left: 16px !important;
+      color: #465750 !important;
+      border: 0 !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      font-size: 12px !important;
+      font-weight: 520 !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-thread-row::before {{
+      content: "";
+      position: absolute;
+      left: 4px;
+      top: 50%;
+      width: 6px;
+      height: 6px;
+      transform: translateY(-50%);
+      border: 1.5px solid #12a890;
+      border-radius: 50%;
+      background: #e8f8ef;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-thread-row:hover {{
+      color: #20332d !important;
+      background: #f0faf6 !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-active-row {{
+      color: #1f4f44 !important;
+      border-color: transparent !important;
+      background: #e8f8ef !important;
+      box-shadow: inset 3px 0 0 #12a890 !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-active-row::before {{
+      border-color: #12a890;
+      background: #12a890;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-sidebar {{
+      --sidebar-footer-height: 84px;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-sidebar [data-app-action-sidebar-scroll] {{
+      scrollbar-gutter: stable;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-account-row {{
+      margin-top: 0 !important;
+      overflow: visible !important;
+      color: #273832 !important;
+      border-color: transparent !important;
+      background: transparent !important;
+      box-shadow: none !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-account-row::before {{
+      content: "⚡  ENFP 能量值                         100%";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: -38px;
+      height: 30px;
+      padding: 0 9px;
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+      pointer-events: none;
+      color: #277669;
+      border: 1px solid color-mix(in srgb, #12a890 18%, #b7ddd4);
+      border-radius: 8px;
+      background: #e8f8ef;
+      font-size: 9px;
+      font-weight: 760;
+      line-height: 1;
+      white-space: pre;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-account-row::after {{
+      content: "";
+      position: absolute;
+      left: 10px;
+      right: 10px;
+      top: -14px;
+      height: 3px;
+      pointer-events: none;
+      border-radius: 2px;
+      background: linear-gradient(90deg, #ef765d 0 34%, #f2c84b 34% 67%, #12a890 67% 100%);
+      box-shadow: none;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-topbar::after {{
+      display: none;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-topbar,
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-sessionbar {{
+      color: #26332f !important;
+      border-color: #e3ded0 !important;
+      background: #fffdf6 !important;
+      backdrop-filter: none !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-window-control {{
+      color: #27332f !important;
+      background: transparent !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-window-minimize:hover,
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-window-maximize:hover {{
+      color: #163f36 !important;
+      background: #dff5ee !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-window-close:hover {{
+      color: #ffffff !important;
+      background: #d92d20 !important;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle {{
+      min-height: 620px;
+      grid-template-rows: minmax(392px, 1fr) auto;
+      gap: 0;
+      padding: 46px 40px 26px;
+      border: 2px solid color-mix(in srgb, #12a890 42%, #b7ddd4);
+      border-radius: 10px;
+      background-color: #fff9e9;
+      background-position: 86% center;
+      font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+      box-shadow:
+        0 22px 52px color-mix(in srgb, #24302d 13%, transparent),
+        7px 7px 0 color-mix(in srgb, #d3f3ea 72%, transparent);
+    }}
+    .cc-theme-showcase.theme-enfp-doodle::before {{
+      background:
+        linear-gradient(90deg,
+          color-mix(in srgb, #fff9e9 99%, transparent) 0%,
+          color-mix(in srgb, #fff9e9 95%, transparent) 35%,
+          color-mix(in srgb, #fff9e9 62%, transparent) 48%,
+          color-mix(in srgb, #fff9e9 10%, transparent) 62%,
+          transparent 100%);
+    }}
+    .cc-theme-showcase.theme-enfp-doodle::after {{
+      content: "✦     〰     ♥     ↗";
+      z-index: 0;
+      inset: 76px auto auto 35%;
+      width: 34%;
+      height: auto;
+      color: #12a890;
+      background: none;
+      filter: none;
+      font-size: clamp(13px, 1.6cqw, 20px);
+      letter-spacing: 10px;
+      opacity: .34;
+      transform: rotate(-5deg);
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-brandline {{
+      top: 32px;
+      left: 42px;
+      right: auto;
+      align-items: flex-start;
+      gap: 0;
+      transform: rotate(-1deg);
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-brandmark {{
+      display: none;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-brandcopy {{
+      gap: 2px;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-brandname {{
+      color: #ef6f43;
+      font-family: "Arial Black", "Microsoft YaHei UI", sans-serif;
+      font-size: 44px;
+      font-weight: 900;
+      line-height: .92;
+      overflow: visible;
+      text-overflow: clip;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-brandmeta {{
+      color: #27332f;
+      font-size: 14px;
+      font-weight: 650;
+      line-height: 1.2;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-status {{
+      display: none;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-status::before {{
+      background: #ef765d;
+      box-shadow: 0 0 0 3px color-mix(in srgb, #ef765d 14%, transparent);
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-copy {{
+      width: min(68%, 780px);
+      align-self: start;
+      margin-top: 108px;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-eyebrow {{
+      display: none;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-title {{
+      max-width: none;
+      color: #1d2926;
+      font-family: "STXingkai", "FZShuTi", "STKaiti", "KaiTi", "Microsoft YaHei", serif;
+      font-size: 52px;
+      font-weight: 400;
+      line-height: 1.08;
+      text-wrap: nowrap;
+      white-space: nowrap;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-title .cc-theme-enfp-title-accent {{
+      text-decoration: underline;
+      text-decoration-color: #ef765d;
+      text-decoration-thickness: 4px;
+      text-underline-offset: 9px;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-subtitle {{
+      display: none;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-badge {{
+      display: none;
+    }}
+    .cc-theme-enfp-mode {{
+      max-width: 680px;
+      margin: 24px 0 0;
+      color: #34433f;
+      font-size: 14px;
+      line-height: 1.65;
+      font-weight: 620;
+    }}
+    .cc-theme-enfp-mode strong {{
+      color: #24302d;
+      font-weight: 820;
+    }}
+    .cc-theme-enfp-mode .coral {{ color: #d95f49; }}
+    .cc-theme-enfp-mode .teal {{ color: #0a9581; }}
+    .cc-theme-enfp-mode .blue {{ color: #2188b5; }}
+    .cc-theme-enfp-tags {{
+      margin-top: 16px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }}
+    .cc-theme-enfp-tags span {{
+      min-height: 27px;
+      padding: 0 11px;
+      display: inline-flex;
+      align-items: center;
+      color: #28665d;
+      border: 1px solid color-mix(in srgb, #12a890 22%, #b7ddd4);
+      border-radius: 999px;
+      background: color-mix(in srgb, #e3f8f2 88%, transparent);
+      font-size: 11px;
+      font-weight: 720;
+    }}
+    .cc-theme-enfp-tags span:nth-child(2) {{
+      color: #86640c;
+      border-color: color-mix(in srgb, #f2c84b 34%, #e5d59a);
+      background: color-mix(in srgb, #fff3c9 90%, transparent);
+    }}
+    .cc-theme-enfp-tags span:nth-child(3) {{
+      color: #a84b3a;
+      border-color: color-mix(in srgb, #ef765d 28%, #f3b8a9);
+      background: color-mix(in srgb, #ffe4dc 90%, transparent);
+    }}
+    .cc-theme-enfp-tags span:nth-child(4) {{
+      color: #21759b;
+      border-color: color-mix(in srgb, #37a9dc 28%, #acd9ec);
+      background: color-mix(in srgb, #dff3fb 90%, transparent);
+    }}
+    .cc-theme-enfp-bubbles {{
+      position: absolute;
+      z-index: 4;
+      top: 48px;
+      right: 3%;
+      width: 194px;
+      display: grid;
+      justify-items: end;
+      gap: 9px;
+      pointer-events: none;
+    }}
+    .cc-theme-enfp-bubbles span {{
+      padding: 8px 13px;
+      color: #a84b3a;
+      border: 1px solid color-mix(in srgb, #ef765d 38%, #f3b8a9);
+      border-radius: 14px 14px 5px 14px;
+      background: color-mix(in srgb, #ffe4dc 92%, transparent);
+      box-shadow: 3px 3px 0 color-mix(in srgb, #f2c84b 24%, transparent);
+      font-size: 11px;
+      font-weight: 760;
+      transform: rotate(2deg);
+    }}
+    .cc-theme-enfp-bubbles span:last-child {{
+      margin-right: 18px;
+      color: #277669;
+      border-color: color-mix(in srgb, #12a890 34%, #b7ddd4);
+      border-radius: 14px 5px 14px 14px;
+      background: color-mix(in srgb, #dff6ef 92%, transparent);
+      transform: rotate(-2deg);
+    }}
+    .cc-theme-enfp-skin-card {{
+      position: absolute;
+      z-index: 4;
+      top: 42%;
+      right: 2.5%;
+      width: 168px;
+      padding: 11px 13px;
+      display: grid;
+      gap: 3px;
+      pointer-events: none;
+      color: #31433e;
+      border: 1px solid color-mix(in srgb, #f2c84b 42%, #dfc96f);
+      border-radius: 7px;
+      background: color-mix(in srgb, #fffef8 92%, transparent);
+      box-shadow: 5px 5px 0 color-mix(in srgb, #12a890 16%, transparent);
+      font-size: 10px;
+      transform: rotate(2deg);
+    }}
+    .cc-theme-enfp-skin-card strong {{
+      color: #a56f00;
+      font-size: 11px;
+    }}
+    .cc-theme-enfp-mood-card {{
+      position: absolute;
+      z-index: 4;
+      right: 18px;
+      bottom: 176px;
+      width: 126px;
+      padding: 10px 11px;
+      display: grid;
+      gap: 4px;
+      pointer-events: none;
+      color: #40514c;
+      border: 1px solid color-mix(in srgb, #f2c84b 38%, #dfc96f);
+      border-radius: 6px;
+      background: color-mix(in srgb, #fff7ce 91%, transparent);
+      box-shadow: 4px 4px 0 color-mix(in srgb, #37a9dc 17%, transparent);
+      font-size: 9px;
+      transform: rotate(-2deg);
+    }}
+    .cc-theme-enfp-mood-card strong {{
+      color: #6d5b12;
+      font-size: 10px;
+    }}
+    .cc-theme-enfp-mood-card span {{
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+    }}
+    .cc-theme-enfp-mood-card i,
+    .cc-theme-enfp-mood-card b {{
+      font-style: normal;
+      font-weight: 650;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-motif {{
+      top: 10%;
+      right: 25%;
+      width: 72px;
+      border: 0;
+      opacity: .52;
+      transform: rotate(10deg);
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-motif::before {{
+      content: "☆";
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: #f2c84b;
+      border: 0;
+      font-size: 48px;
+      transform: none;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-motif::after {{
+      content: "↗";
+      inset: 38px -24px auto auto;
+      color: #37a9dc;
+      border: 0;
+      background: none;
+      font-size: 28px;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-cards {{
+      margin-top: -10px;
+      gap: 16px;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card {{
+      min-height: 150px;
+      padding: 18px 15px !important;
+      grid-template-columns: 54px minmax(0, 1fr) 22px;
+      gap: 13px;
+      border-radius: 8px !important;
+      background: color-mix(in srgb, #fffef8 90%, transparent) !important;
+      box-shadow:
+        0 10px 22px color-mix(in srgb, #24302d 9%, transparent),
+        inset 0 0 0 1px color-mix(in srgb, #ffffff 70%, transparent);
+      backdrop-filter: blur(8px);
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card:nth-child(1) {{
+      background: color-mix(in srgb, #fff0e9 92%, transparent) !important;
+      transform: rotate(-.5deg);
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card:nth-child(2) {{
+      background: color-mix(in srgb, #e9f9f4 92%, transparent) !important;
+      transform: rotate(.4deg);
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card:nth-child(3) {{
+      background: color-mix(in srgb, #e9f6fc 92%, transparent) !important;
+      transform: rotate(-.35deg);
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card:nth-child(4) {{
+      background: color-mix(in srgb, #fff8d8 92%, transparent) !important;
+      transform: rotate(.55deg);
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card:hover {{
+      transform: translateY(-3px) rotate(0);
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card-icon {{
+      width: 52px;
+      height: 52px;
+      color: #ffffff;
+      border-radius: 12px 16px 11px 15px;
+      background: #ef765d;
+      box-shadow: 4px 4px 0 color-mix(in srgb, #ef765d 18%, transparent);
+      transform: rotate(-5deg);
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card-label {{
+      font-size: 15px;
+      line-height: 1.35;
+      font-weight: 760;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card-description {{
+      margin-top: 7px;
+      font-size: 11px;
+      line-height: 1.55;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card:nth-child(2) .cc-theme-showcase-card-icon,
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card:nth-child(2) .cc-theme-showcase-card-arrow {{
+      background: #12a890;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card:nth-child(3) .cc-theme-showcase-card-icon,
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card:nth-child(3) .cc-theme-showcase-card-arrow {{
+      background: #37a9dc;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card:nth-child(4) .cc-theme-showcase-card-icon,
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card:nth-child(4) .cc-theme-showcase-card-arrow {{
+      color: #5b4a06;
+      background: #f2c84b;
+    }}
+    .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card-index {{
+      color: color-mix(in srgb, #24302d 38%, transparent);
+    }}
+    html[data-codex-compass-showcase="enfp-doodle"] .cc-theme-showcase-composer,
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-composer {{
+      border: 2px solid color-mix(in srgb, #12a890 62%, #b7ddd4) !important;
+      border-radius: 12px !important;
+      background:
+        linear-gradient(180deg,
+          color-mix(in srgb, #fffef8 96%, transparent),
+          color-mix(in srgb, #fff9e9 94%, transparent)) !important;
+      box-shadow:
+        0 14px 32px color-mix(in srgb, #24302d 10%, transparent),
+        5px 5px 0 color-mix(in srgb, #d3f3ea 60%, transparent) !important;
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-composer::before {{
+      content: "✦";
+      color: #ef765d;
+      border-color: color-mix(in srgb, #ef765d 28%, #f3b8a9);
+      background: color-mix(in srgb, #fff0e7 78%, transparent);
+      transform: rotate(-5deg);
+    }}
+    html[data-codex-compass-theme="enfp-doodle"] .cc-theme-shell-composer::after {{
+      width: 180px;
+      height: 3px;
+      background: #12a890;
+      box-shadow: -48px 0 0 #f2c84b, -96px 0 0 #ef765d;
+    }}
+    @media (max-width: 980px) {{
+      .cc-theme-enfp-bubbles,
+      .cc-theme-enfp-skin-card,
+      .cc-theme-enfp-mood-card {{
+        display: none;
+      }}
+      .cc-theme-showcase.theme-enfp-doodle {{
+        min-height: 560px;
+        grid-template-rows: minmax(250px, 1fr) auto;
+        padding: 32px 24px 20px;
+        background-position: 76% center;
+      }}
+      .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-brandline {{
+        top: 24px;
+        left: 28px;
+      }}
+      .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-copy {{
+        width: min(72%, 620px);
+        margin-top: 76px;
+      }}
+      .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-brandname {{
+        font-size: 36px;
+      }}
+      .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-title {{
+        font-size: 36px;
+        text-wrap: balance;
+        white-space: normal;
+      }}
+      .cc-theme-showcase.theme-enfp-doodle .cc-theme-enfp-mode {{
+        margin-top: 16px;
+        font-size: 12px;
+      }}
+      .cc-theme-showcase.theme-enfp-doodle .cc-theme-enfp-tags {{
+        margin-top: 12px;
+        gap: 7px;
+      }}
+      .cc-theme-showcase.theme-enfp-doodle .cc-theme-enfp-tags span {{
+        padding: 5px 9px;
+        font-size: 9px;
+      }}
+      .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-cards {{
+        margin-top: 0;
+        gap: 10px;
+      }}
+      .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card {{
+        min-height: 108px;
+        padding: 12px 10px !important;
+        grid-template-columns: 38px minmax(0, 1fr) 18px;
+        gap: 8px;
+      }}
+      .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card-icon {{
+        width: 38px;
+        height: 38px;
+        border-radius: 9px 11px 8px 10px;
+      }}
+      .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card-icon svg {{
+        width: 18px;
+        height: 18px;
+      }}
+      .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card-label {{
+        font-size: 13px;
+      }}
+      .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-card-description {{
+        margin-top: 4px;
+        font-size: 9px;
+        line-height: 1.4;
+        -webkit-line-clamp: 2;
+      }}
+    }}
+    @media (max-width: 620px) {{
+      .cc-theme-showcase.theme-enfp-doodle {{
+        min-height: 610px;
+        grid-template-rows: minmax(285px, 1fr) auto;
+        background-position: 72% center;
+      }}
+      .cc-theme-showcase.theme-enfp-doodle::before {{
+        background: color-mix(in srgb, #fff9e9 84%, transparent);
+      }}
+      .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-copy {{
+        width: 100%;
+        margin-top: 86px;
+      }}
+      .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-title {{
+        font-size: 34px;
+        text-wrap: balance;
+        white-space: normal;
+      }}
+      .cc-theme-enfp-tags span:nth-child(4) {{
+        display: none;
+      }}
+      .cc-theme-showcase.theme-enfp-doodle .cc-theme-showcase-cards {{
+        margin-top: 0;
+      }}
+    }}
     .cc-theme-showcase.layout-cosmic,
     .cc-theme-showcase.layout-stage {{
       min-height: clamp(520px, 45cqw, 585px);
@@ -3523,7 +4997,7 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
     ::-webkit-scrollbar-thumb {{ background: color-mix(in srgb, var(--cc-theme-accent) 45%, transparent); }}
   `;
   document.documentElement.appendChild(style);
-  document.documentElement.dataset.codexCompassTheme = config.id;
+  setDatasetValue(document.documentElement, "codexCompassTheme", config.id);
   const showcase = config.showcase || {{}};
   const iconMarkup = {{
     code: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 9-3 3 3 3"/><path d="m16 9 3 3-3 3"/><path d="m14 5-4 14"/></svg>',
@@ -3546,42 +5020,172 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
   function normalizedText(node) {{
     return String(node?.textContent || "").replace(/\s+/g, " ").trim();
   }}
+  const projectArchiveCleanupTimers = new Set();
+  function projectContextMenuItems(menu) {{
+    const semanticItems = Array.from(menu.querySelectorAll('[role="menuitem"], [data-radix-collection-item]'));
+    return semanticItems.length ? semanticItems : Array.from(menu.querySelectorAll("button"));
+  }}
+  function visibleProjectArchiveConfirmation() {{
+    return Array.from(document.querySelectorAll('[role="dialog"], [role="alertdialog"]')).some((dialog) => {{
+      if (!isVisibleElement(dialog)) return false;
+      return /(?:归档|archive)/i.test(normalizedText(dialog)) && dialog.querySelector("button");
+    }});
+  }}
+  function dismissStaleProjectArchiveSurfaces() {{
+    if (visibleProjectArchiveConfirmation()) return;
+    document.dispatchEvent(new KeyboardEvent("keydown", {{
+      key: "Escape",
+      code: "Escape",
+      bubbles: true,
+      cancelable: true,
+    }}));
+  }}
+  function scheduleProjectArchiveCleanup(delay) {{
+    let timer = 0;
+    timer = window.setTimeout(() => {{
+      projectArchiveCleanupTimers.delete(timer);
+      dismissStaleProjectArchiveSurfaces();
+    }}, delay);
+    projectArchiveCleanupTimers.add(timer);
+  }}
+  function handleProjectArchiveClick(event) {{
+    const target = event.target instanceof Element
+      ? event.target.closest('[data-codex-theme-project-menu-action="archive"]')
+      : null;
+    if (!target) return;
+    scheduleProjectArchiveCleanup(120);
+    scheduleProjectArchiveCleanup(360);
+  }}
+  function decorateProjectContextMenus() {{
+    document.querySelectorAll('[role="menu"], [data-radix-menu-content]').forEach((menu) => {{
+      if (!(menu instanceof HTMLElement)) return;
+      const items = projectContextMenuItems(menu);
+      const hasRenameProject = items.some((item) => /^(?:重命名项目|rename project)$/i.test(normalizedText(item)));
+      if (!hasRenameProject) return;
+      setDatasetValue(menu, "codexThemeProjectContextMenu", "true");
+      setDatasetValue(menu, "codexThemeProjectContextMenuVersion", "1");
+      items.forEach((item) => {{
+        const label = normalizedText(item);
+        if (/^(?:重命名项目|rename project)$/i.test(label)) {{
+          setDatasetValue(item, "codexThemeProjectMenuAction", "rename");
+          return;
+        }}
+        if (/^(?:归档任务|归档项目|archive(?: task| project)?)$/i.test(label)) {{
+          setDatasetValue(item, "codexThemeProjectMenuAction", "archive");
+        }}
+      }});
+    }});
+  }}
+  function decorateProjectRenameDialogs() {{
+    document.querySelectorAll('[role="dialog"], [data-slot="dialog-content"]').forEach((dialog) => {{
+      if (!(dialog instanceof HTMLElement)) return;
+      const label = [
+        dialog.getAttribute("aria-label"),
+        normalizedText(dialog.querySelector('h1, h2, h3, [data-slot="dialog-title"]')),
+        normalizedText(dialog).slice(0, 120),
+      ].filter(Boolean).join(" ");
+      if (!/(?:重命名项目|rename project)/i.test(label)) return;
+      setDatasetValue(dialog, "codexThemeProjectRenameDialog", "true");
+      const field = dialog.querySelector('input:not([type="hidden"]), textarea');
+      setDatasetValue(field, "codexThemeProjectRenameField", "true");
+      const buttons = Array.from(dialog.querySelectorAll("button"));
+      const cancel = buttons.find((button) => /^(?:取消|cancel)$/i.test(normalizedText(button)));
+      const save = buttons.find((button) => /^(?:保存|save)$/i.test(normalizedText(button)));
+      const close = buttons.find((button) => {{
+        const labels = [
+          button.getAttribute("aria-label"),
+          button.getAttribute("title"),
+        ].filter(Boolean).map((value) => String(value).trim());
+        return labels.some((value) => /^(?:关闭|close)$/i.test(value))
+          || /^(?:×|✕)$/i.test(normalizedText(button));
+      }});
+      setDatasetValue(cancel, "codexThemeProjectRenameAction", "cancel");
+      setDatasetValue(save, "codexThemeProjectRenameAction", "save");
+      setDatasetValue(close, "codexThemeProjectRenameAction", "close");
+      const actions = cancel && save && cancel.parentElement === save.parentElement ? cancel.parentElement : null;
+      setDatasetValue(actions, "codexThemeProjectRenameActions", "true");
+    }});
+  }}
+  function decorateProjectContextUi() {{
+    decorateProjectContextMenus();
+    decorateProjectRenameDialogs();
+  }}
   function isVisibleElement(node) {{
     if (!(node instanceof HTMLElement)) return false;
     const rect = node.getBoundingClientRect();
     return rect.width > 1 && rect.height > 1;
+  }}
+  function isSettingsNavigationSurface(node) {{
+    let current = node;
+    for (let depth = 0; current instanceof HTMLElement && depth < 5; depth += 1, current = current.parentElement) {{
+      const rect = current.getBoundingClientRect();
+      const isLeftNavigationColumn = rect.left <= 32
+        && rect.width >= 140
+        && rect.width <= 480
+        && rect.height >= window.innerHeight * .45;
+      if (!isLeftNavigationColumn) continue;
+      const navigationControls = Array.from(
+        current.querySelectorAll('a,button,[role="link"],[role="button"]')
+      ).filter(isVisibleElement);
+      const hasBackToApp = navigationControls.some((control) =>
+        /^(返回应用|back to app)$/i.test(normalizedText(control))
+      );
+      const hasSettingsSearch = Array.from(current.querySelectorAll('input,[role="searchbox"]')).some((control) => {{
+        if (!isVisibleElement(control)) return false;
+        const label = [
+          control.getAttribute("aria-label"),
+          control.getAttribute("placeholder"),
+          control.getAttribute("title"),
+        ].filter(Boolean).join(" ");
+        return /搜索设置|search settings/i.test(label);
+      }});
+      if (hasBackToApp || hasSettingsSearch) return true;
+    }}
+    return false;
   }}
   function directChildWithin(node, root) {{
     let current = node;
     while (current?.parentElement && current.parentElement !== root) current = current.parentElement;
     return current?.parentElement === root ? current : null;
   }}
+  function setClassState(node, className, enabled) {{
+    if (!(node instanceof HTMLElement)) return;
+    if (node.classList.contains(className) === enabled) return;
+    node.classList.toggle(className, enabled);
+  }}
+  function setDatasetValue(node, key, value) {{
+    if (!(node instanceof HTMLElement)) return;
+    const next = String(value);
+    if (node.dataset[key] === next) return;
+    node.dataset[key] = next;
+  }}
   function setSingletonClass(className, node) {{
     document.querySelectorAll(`.${{className}}`).forEach((candidate) => {{
-      if (candidate !== node) candidate.classList.remove(className);
+      if (candidate !== node) setClassState(candidate, className, false);
     }});
-    node?.classList?.add(className);
+    setClassState(node, className, true);
   }}
   function syncClassMembers(className, nodes) {{
     const wanted = new Set(Array.from(nodes || []).filter((node) => node instanceof HTMLElement));
     document.querySelectorAll(`.${{className}}`).forEach((node) => {{
-      if (!wanted.has(node)) node.classList.remove(className);
+      if (!wanted.has(node)) setClassState(node, className, false);
     }});
-    wanted.forEach((node) => node.classList.add(className));
+    wanted.forEach((node) => setClassState(node, className, true));
   }}
   function findSidebar() {{
     const scroll = document.querySelector('[data-app-action-sidebar-scroll]');
     let current = scroll;
     const scrollRect = scroll instanceof HTMLElement ? scroll.getBoundingClientRect() : null;
     for (let depth = 0; current instanceof HTMLElement && depth < 7; depth += 1, current = current.parentElement) {{
-      if (current.matches('nav,aside,[data-slot="sidebar"]')) return current;
+      if (current.matches('nav,aside,[data-slot="sidebar"]') && !isSettingsNavigationSurface(current)) return current;
       const rect = current.getBoundingClientRect();
       if (depth > 0
         && scrollRect
         && rect.left <= 24
         && rect.width >= 150
         && rect.width <= 440
-        && rect.height >= scrollRect.height + 36) return current;
+        && rect.height >= scrollRect.height + 36
+        && !isSettingsNavigationSurface(current)) return current;
     }}
     const newTask = Array.from(document.querySelectorAll('button,[role="button"]')).find((node) =>
       /^(新建任务|新任务|new task|new chat)$/i.test(normalizedText(node))
@@ -3589,16 +5193,42 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
     current = newTask;
     for (let depth = 0; current instanceof HTMLElement && depth < 9; depth += 1, current = current.parentElement) {{
       const rect = current.getBoundingClientRect();
-      if (rect.left <= 24 && rect.width >= 150 && rect.width <= 440 && rect.height >= window.innerHeight * .54) {{
+      if (rect.left <= 24
+        && rect.width >= 150
+        && rect.width <= 440
+        && rect.height >= window.innerHeight * .54
+        && !isSettingsNavigationSurface(current)) {{
         return current;
       }}
     }}
     return Array.from(document.querySelectorAll('aside,nav,[data-slot="sidebar"]')).find((node) => {{
       if (!(node instanceof HTMLElement)) return false;
       const rect = node.getBoundingClientRect();
-      return rect.left <= 24 && rect.width >= 150 && rect.width <= 440 && rect.height >= window.innerHeight * .54;
+      return rect.left <= 24
+        && rect.width >= 150
+        && rect.width <= 440
+        && rect.height >= window.innerHeight * .54
+        && !isSettingsNavigationSurface(node);
     }}) || null;
   }}
+  function forwardSidebarRowWheel(event) {{
+    if (event.defaultPrevented || event.ctrlKey || !(event.target instanceof Element)) return;
+    const row = event.target.closest(".cc-theme-shell-project-row,.cc-theme-shell-thread-row");
+    if (!(row instanceof HTMLElement)) return;
+    const scroll = row.closest('[data-app-action-sidebar-scroll]');
+    if (!(scroll instanceof HTMLElement) || scroll.scrollHeight <= scroll.clientHeight) return;
+    const multiplier = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+      ? 16
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+        ? scroll.clientHeight
+        : 1;
+    const delta = event.deltaY * multiplier;
+    if (!Number.isFinite(delta) || delta === 0) return;
+    const previousTop = scroll.scrollTop;
+    scroll.scrollTop += delta;
+    if (scroll.scrollTop !== previousTop) event.preventDefault();
+  }}
+  document.addEventListener("wheel", forwardSidebarRowWheel, {{ capture: true, passive: false }});
   function findTopbars(sidebar) {{
     const appHeader = document.querySelector('.app-header-tint') || Array.from(document.querySelectorAll('header,[role="banner"]')).find((node) => {{
       if (!(node instanceof HTMLElement)) return false;
@@ -3623,19 +5253,47 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
     }})[0] || null;
     return {{ appHeader: appHeader || null, sessionbar }};
   }}
-  function decorateSidebar(sidebar) {{
-    setSingletonClass(shellSidebarClass, sidebar);
+  function findSidebarAccountScope(sidebar) {{
     if (!(sidebar instanceof HTMLElement)) return null;
+    const sidebarRect = sidebar.getBoundingClientRect();
+    let scope = sidebar;
+    let current = sidebar.parentElement;
+    for (let depth = 0; current instanceof HTMLElement && depth < 6; depth += 1, current = current.parentElement) {{
+      const rect = current.getBoundingClientRect();
+      const sharesSidebarColumn = Math.abs(rect.left - sidebarRect.left) <= 4
+        && Math.abs(rect.right - sidebarRect.right) <= 4
+        && rect.width >= 150
+        && rect.width <= 440;
+      const coversSidebar = rect.top <= sidebarRect.top + 16
+        && rect.bottom >= sidebarRect.bottom - 16;
+      if (!sharesSidebarColumn || !coversSidebar) break;
+      scope = current;
+    }}
+    return scope;
+  }}
+  function decorateSidebar(sidebar) {{
+    if (!(sidebar instanceof HTMLElement) || isSettingsNavigationSurface(sidebar)) {{
+      clearSidebarDecorations();
+      return null;
+    }}
+    setSingletonClass(shellSidebarClass, sidebar);
+    const keepSidebarStatic = sidebar.classList.contains(shellSidebarStaticClass)
+      || getComputedStyle(sidebar).position === "static";
+    setSingletonClass(shellSidebarStaticClass, keepSidebarStatic ? sidebar : null);
     const rect = sidebar.getBoundingClientRect();
+    const accountScope = findSidebarAccountScope(sidebar) || sidebar;
     const allButtons = Array.from(sidebar.querySelectorAll('button,[role="button"]'));
+    const accountButtons = accountScope === sidebar
+      ? allButtons
+      : Array.from(accountScope.querySelectorAll('button,[role="button"]'));
     const topButtons = allButtons.slice(0, 40).filter(isVisibleElement);
     const productButton = sidebar.querySelector('button[aria-haspopup="menu"]')
       || topButtons.find((node) => /^codex\b/i.test(normalizedText(node)))
       || topButtons.find((node) => node.querySelector?.('[data-testid="home-icon"]'));
     let productNode = productButton;
     if (productButton instanceof HTMLElement) {{
-      productButton.dataset.ccThemeLabel = config.name || "Codex Compass";
-      productButton.dataset.ccThemeMark = themeMark;
+      setDatasetValue(productButton, "ccThemeLabel", config.name || "Codex Compass");
+      setDatasetValue(productButton, "ccThemeMark", themeMark);
     }} else if (!document.getElementById("codex-compass-theme-shell-brand")) {{
       const brand = document.createElement("div");
       brand.id = "codex-compass-theme-shell-brand";
@@ -3653,20 +5311,74 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
     }}
     setSingletonClass("cc-theme-shell-product-button", productNode);
     const newTaskButton = topButtons.find((button) => /^(新建任务|新任务|new task|new chat)$/i.test(normalizedText(button)));
+    const searchButton = topButtons.find((button) => /search|搜索/i.test([
+      button.getAttribute("aria-label"),
+      button.getAttribute("title"),
+      normalizedText(button),
+    ].filter(Boolean).join(" ")));
     const topNavigation = topButtons.filter((button) => {{
-      if (button === productButton || button === newTaskButton) return;
+      if (button === productButton || button === newTaskButton || button === searchButton) return;
+      if (button.closest?.('[data-app-action-sidebar-section-heading]')) return false;
       const buttonRect = button.getBoundingClientRect();
-      return buttonRect.width >= rect.width * .48 && buttonRect.height <= 72 && buttonRect.top < rect.top + 250;
+      const label = [
+        button.getAttribute("aria-label"),
+        button.getAttribute("title"),
+        normalizedText(button),
+      ].filter(Boolean).join(" ");
+      const knownNavigation = /scheduled|已安排|calendar|日程|skill|技能|plugin|插件|site|站点|chat|聊天|pull request|拉取请求|review|审查/i.test(label);
+      return buttonRect.width >= rect.width * .48
+        && buttonRect.height <= 72
+        && (knownNavigation || buttonRect.top < rect.top + 250);
     }});
     const projectRows = Array.from(sidebar.querySelectorAll('[data-app-action-sidebar-project-row]'));
     const threadRows = Array.from(sidebar.querySelectorAll('[data-app-action-sidebar-thread-row]'));
     const activeRows = threadRows.filter((node) => node.matches('[data-app-action-sidebar-thread-active="true"],[aria-current="page"]'));
     const headings = Array.from(sidebar.querySelectorAll('[data-app-action-sidebar-section-heading]'));
-    const accountRows = allButtons.slice(-16).filter((button) => {{
+    const belongsToSidebarCollection = (button) =>
+      button.matches?.('[data-app-action-sidebar-project-row],[data-app-action-sidebar-thread-row]')
+      || !!button.closest?.(
+        '[data-app-action-sidebar-project-row],[data-app-action-sidebar-thread-row],[data-app-action-sidebar-section-heading]'
+      );
+    const profileTrigger = accountButtons.find((button) => {{
+      if (!isVisibleElement(button) || belongsToSidebarCollection(button)) return false;
+      const label = [
+        button.getAttribute("aria-label"),
+        button.getAttribute("title"),
+      ].filter(Boolean).join(" ");
+      return /profile|personal profile|account|个人资料|个人档案|账户|账号/i.test(label);
+    }}) || null;
+    const accountRow = profileTrigger || accountButtons.slice(-24).filter((button) => {{
       if (!isVisibleElement(button)) return;
+      if (belongsToSidebarCollection(button)) return false;
       const buttonRect = button.getBoundingClientRect();
-      return buttonRect.top >= rect.bottom - 110 && buttonRect.bottom <= rect.bottom + 12;
+      return buttonRect.top >= rect.bottom - 116
+        && buttonRect.bottom <= rect.bottom + 12
+        && buttonRect.width >= rect.width * .48;
+    }}).sort((left, right) => {{
+      const leftPopup = left.getAttribute("aria-haspopup") === "menu" ? 1 : 0;
+      const rightPopup = right.getAttribute("aria-haspopup") === "menu" ? 1 : 0;
+      if (leftPopup !== rightPopup) return rightPopup - leftPopup;
+      return right.getBoundingClientRect().width - left.getBoundingClientRect().width;
+    }})[0] || null;
+    const navToneRows = {{ coral: [], mint: [], sky: [], violet: [] }};
+    topNavigation.forEach((button, index) => {{
+      const label = [
+        button.getAttribute("aria-label"),
+        button.getAttribute("title"),
+        normalizedText(button),
+      ].filter(Boolean).join(" ");
+      const tone = /scheduled|已安排|calendar|日程/i.test(label)
+        ? "coral"
+        : /skill|技能|plugin|插件/i.test(label)
+          ? "mint"
+          : /site|站点|chat|聊天/i.test(label)
+            ? "sky"
+            : /pull request|拉取请求|review|审查/i.test(label)
+              ? "violet"
+              : ["coral", "mint", "sky", "violet"][index % 4];
+      navToneRows[tone].push(button);
     }});
+    syncClassMembers("cc-theme-shell-search-button", searchButton ? [searchButton] : []);
     syncClassMembers("cc-theme-shell-new-task", newTaskButton ? [newTaskButton] : []);
     syncClassMembers("cc-theme-shell-nav-row", [
       ...(newTaskButton ? [newTaskButton] : []),
@@ -3678,15 +5390,62 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
     syncClassMembers("cc-theme-shell-thread-row", threadRows);
     syncClassMembers("cc-theme-shell-active-row", activeRows);
     syncClassMembers("cc-theme-shell-group-heading", headings);
-    syncClassMembers("cc-theme-shell-account-row", accountRows);
+    syncClassMembers("cc-theme-shell-account-row", accountRow ? [accountRow] : []);
+    const keepAccountStatic = accountRow instanceof HTMLElement
+      && (accountRow.classList.contains(shellAccountStaticClass)
+        || getComputedStyle(accountRow).position === "static");
+    setSingletonClass(shellAccountStaticClass, keepAccountStatic ? accountRow : null);
+    syncClassMembers("cc-theme-shell-nav-coral", navToneRows.coral);
+    syncClassMembers("cc-theme-shell-nav-mint", navToneRows.mint);
+    syncClassMembers("cc-theme-shell-nav-sky", navToneRows.sky);
+    syncClassMembers("cc-theme-shell-nav-violet", navToneRows.violet);
     return sidebar;
+  }}
+  function decorateWindowControls(appHeader) {{
+    const declaredAction = (node) => String(
+      node?.getAttribute?.("data-window-action")
+      || node?.getAttribute?.("data-app-window-action")
+      || node?.getAttribute?.("data-window-control")
+      || ""
+    ).trim().toLowerCase();
+    const semanticAction = (node, allowLabel) => {{
+      const declared = declaredAction(node);
+      if (/^(minimize|minimise)$/.test(declared)) return "minimize";
+      if (/^(maximize|maximise|restore)$/.test(declared)) return "maximize";
+      if (declared === "close") return "close";
+      if (!allowLabel) return "";
+      const labels = [
+        node?.getAttribute?.("aria-label"),
+        node?.getAttribute?.("title"),
+      ].filter(Boolean).map((value) => String(value).trim());
+      if (labels.some((value) => /^(minimi[sz]e|最小化)$/i.test(value))) return "minimize";
+      if (labels.some((value) => /^(maximi[sz]e|restore|最大化|还原|最大化或还原)$/i.test(value))) return "maximize";
+      if (labels.some((value) => /^(close|关闭)$/i.test(value))) return "close";
+      return "";
+    }};
+    const explicit = Array.from(document.querySelectorAll(
+      '[data-window-action],[data-app-window-action],[data-window-control]'
+    )).filter((node) => isVisibleElement(node) && semanticAction(node, false));
+    const labeled = appHeader instanceof HTMLElement
+      ? Array.from(appHeader.querySelectorAll('button,[role="button"]'))
+        .filter((node) => isVisibleElement(node) && semanticAction(node, true))
+      : [];
+    const candidates = Array.from(new Set([...explicit, ...labeled]));
+    const minimize = candidates.find((node) => semanticAction(node, true) === "minimize") || null;
+    const maximize = candidates.find((node) => semanticAction(node, true) === "maximize") || null;
+    const close = candidates.find((node) => semanticAction(node, true) === "close") || null;
+    syncClassMembers("cc-theme-shell-window-control", candidates);
+    syncClassMembers("cc-theme-shell-window-minimize", minimize ? [minimize] : []);
+    syncClassMembers("cc-theme-shell-window-maximize", maximize ? [maximize] : []);
+    syncClassMembers("cc-theme-shell-window-close", close ? [close] : []);
   }}
   function decorateTopbars(topbars) {{
     setSingletonClass(shellTopbarClass, topbars?.appHeader);
     setSingletonClass(shellSessionbarClass, topbars?.sessionbar);
     if (topbars?.appHeader instanceof HTMLElement) {{
-      topbars.appHeader.dataset.ccThemeLabel = String(p.headerBadge || config.name || "Codex Compass");
+      setDatasetValue(topbars.appHeader, "ccThemeLabel", p.headerBadge || config.name || "Codex Compass");
     }}
+    decorateWindowControls(topbars?.appHeader);
   }}
   function decorateComposer(composer) {{
     setSingletonClass(shellComposerClass, composer);
@@ -3697,7 +5456,7 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
       syncClassMembers("cc-theme-shell-attach-button", []);
       return;
     }}
-    composer.dataset.ccThemeMark = themeMark;
+    setDatasetValue(composer, "ccThemeMark", themeMark);
     const buttons = Array.from(composer.querySelectorAll('button,[role="button"]')).filter(isVisibleElement);
     const sendButton = composer.querySelector('button[aria-label="发送"],button[aria-label="Send"],button[aria-label="提交"],button[aria-label="Submit"],button[aria-label="停止"],button[aria-label="Stop"]')
       || buttons.find((button) => /send|submit|stop|发送|提交|停止/i.test([
@@ -3729,7 +5488,7 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
     const sidebar = decorateSidebar(findSidebar());
     decorateTopbars(findTopbars(sidebar));
     decorateComposer(findComposer(home));
-    document.documentElement.dataset.codexCompassThemeShell = "v1";
+    setDatasetValue(document.documentElement, "codexCompassThemeShell", "v3");
   }}
   function summarizeCardPrompt(card) {{
     const prompt = String(card?.prompt || "").replace(/\s+/g, " ").trim();
@@ -3818,10 +5577,19 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
     brandcopy.className = "cc-theme-showcase-brandcopy";
     const brandname = document.createElement("span");
     brandname.className = "cc-theme-showcase-brandname";
-    brandname.textContent = config.name || "Codex Compass";
     const brandmeta = document.createElement("span");
     brandmeta.className = "cc-theme-showcase-brandmeta";
-    brandmeta.textContent = showcase.eyebrow || "Codex Compass Theme Studio";
+    if (config.id === "enfp-doodle") {{
+      const [brand, ...statusParts] = String(showcase.eyebrow || "")
+        .split("·")
+        .map((part) => part.trim())
+        .filter(Boolean);
+      brandname.textContent = brand || "ENFP";
+      brandmeta.textContent = statusParts.join(" · ") || "灵感发动机已启动 ♥";
+    }} else {{
+      brandname.textContent = config.name || "Codex Compass";
+      brandmeta.textContent = showcase.eyebrow || "Codex Compass Theme Studio";
+    }}
     brandcopy.append(brandname, brandmeta);
     const status = document.createElement("span");
     status.className = "cc-theme-showcase-status";
@@ -3831,7 +5599,7 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
 
     const copy = document.createElement("div");
     copy.className = "cc-theme-showcase-copy";
-    if (showcase.eyebrow) {{
+    if (showcase.eyebrow && config.id !== "enfp-doodle") {{
       const eyebrow = document.createElement("span");
       eyebrow.className = "cc-theme-showcase-eyebrow";
       eyebrow.textContent = showcase.eyebrow;
@@ -3839,9 +5607,32 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
     }}
     const title = document.createElement("h1");
     title.className = "cc-theme-showcase-title";
-    title.textContent = showcase.title || config.name || "Codex";
+    const titleText = showcase.title || config.name || "Codex";
+    if (config.id === "enfp-doodle" && titleText === "先有灵感，再把它变成真的") {{
+      [["先有灵感", true], ["，再把它变成", false], ["真的", true]].forEach(([text, accent]) => {{
+        const segment = document.createElement("span");
+        segment.textContent = String(text);
+        if (accent) segment.className = "cc-theme-enfp-title-accent";
+        title.appendChild(segment);
+      }});
+    }} else {{
+      title.textContent = titleText;
+    }}
     copy.appendChild(title);
-    if (showcase.subtitle) {{
+    if (config.id === "enfp-doodle") {{
+      const mode = document.createElement("p");
+      mode.className = "cc-theme-enfp-mode";
+      mode.innerHTML = '<strong>ENFP 模式：</strong><span class="coral">脑暴</span>、<span class="teal">试错</span>、<span class="blue">灵感乱飞</span>，但最后都能落地。';
+      copy.appendChild(mode);
+      const tags = document.createElement("div");
+      tags.className = "cc-theme-enfp-tags";
+      ["# 自由探索", "# 创意无限", "# 热情驱动", "# 趣味至上"].forEach((label) => {{
+        const tag = document.createElement("span");
+        tag.textContent = label;
+        tags.appendChild(tag);
+      }});
+      copy.appendChild(tags);
+    }} else if (showcase.subtitle) {{
       const subtitle = document.createElement("p");
       subtitle.className = "cc-theme-showcase-subtitle";
       subtitle.textContent = showcase.subtitle;
@@ -3861,6 +5652,45 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
       motif.dataset.codexThemeDecoration = String(p.motifStyle);
       motif.setAttribute("aria-hidden", "true");
       root.appendChild(motif);
+    }}
+
+    if (config.id === "enfp-doodle") {{
+      const bubbles = document.createElement("div");
+      bubbles.className = "cc-theme-enfp-bubbles";
+      bubbles.setAttribute("aria-hidden", "true");
+      ["今天适合开脑洞 ✦", "好点子 +99"].forEach((label) => {{
+        const bubble = document.createElement("span");
+        bubble.textContent = label;
+        bubbles.appendChild(bubble);
+      }});
+      root.appendChild(bubbles);
+
+      const skinCard = document.createElement("div");
+      skinCard.className = "cc-theme-enfp-skin-card";
+      skinCard.setAttribute("aria-hidden", "true");
+      const skinTitle = document.createElement("strong");
+      skinTitle.textContent = "♛ 专属皮肤 · ENFP";
+      const skinId = document.createElement("span");
+      skinId.textContent = "ID: ENFP_灵感小王子";
+      skinCard.append(skinTitle, skinId);
+      root.appendChild(skinCard);
+
+      const moodCard = document.createElement("div");
+      moodCard.className = "cc-theme-enfp-mood-card";
+      moodCard.setAttribute("aria-hidden", "true");
+      const moodTitle = document.createElement("strong");
+      moodTitle.textContent = "今日心情卡 ☺";
+      moodCard.appendChild(moodTitle);
+      [["创意", "+100"], ["动力", "+100"], ["乐趣", "+100"]].forEach(([label, value]) => {{
+        const row = document.createElement("span");
+        const name = document.createElement("i");
+        const score = document.createElement("b");
+        name.textContent = label;
+        score.textContent = value;
+        row.append(name, score);
+        moodCard.appendChild(row);
+      }});
+      root.appendChild(moodCard);
     }}
 
     const companion = document.createElement("div");
@@ -3930,9 +5760,10 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
   }}
   function syncShowcase() {{
     if (!document.getElementById(styleId)) document.documentElement.appendChild(style);
-    document.documentElement.dataset.codexCompassTheme = config.id;
-    document.documentElement.dataset.codexCompassTaskMode = p.taskMode || "ambient";
-    document.documentElement.dataset.codexCompassLayout = p.layoutStyle || "editorial";
+    setDatasetValue(document.documentElement, "codexCompassTheme", config.id);
+    setDatasetValue(document.documentElement, "codexCompassTaskMode", p.taskMode || "ambient");
+    setDatasetValue(document.documentElement, "codexCompassLayout", p.layoutStyle || "editorial");
+    decorateProjectContextUi();
     const home = findHomeSurface();
     decorateCodexShell(home);
     if (!showcase.enabled) {{
@@ -3942,18 +5773,18 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
     const host = home ? findShowcaseHost(home) : null;
     if (!(home instanceof HTMLElement) || !(host instanceof HTMLElement)) {{
       clearShowcaseDom();
-      document.documentElement.dataset.codexCompassThemePage = "thread";
+      setDatasetValue(document.documentElement, "codexCompassThemePage", "thread");
       return false;
     }}
-    document.documentElement.dataset.codexCompassThemePage = "home";
+    setDatasetValue(document.documentElement, "codexCompassThemePage", "home");
     document.querySelectorAll(`.${{showcaseHomeClass}}`).forEach((node) => {{
       if (node !== home) node.classList.remove(showcaseHomeClass);
     }});
     document.querySelectorAll(`.${{showcaseHostClass}}`).forEach((node) => {{
       if (node !== host) node.classList.remove(showcaseHostClass);
     }});
-    home.classList.add(showcaseHomeClass);
-    host.classList.add(showcaseHostClass);
+    setClassState(home, showcaseHomeClass, true);
+    setClassState(host, showcaseHostClass, true);
     let root = document.getElementById(showcaseId);
     if (!root || root.parentElement !== host) {{
       root?.remove();
@@ -3963,9 +5794,9 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
       if (node !== findComposer(home)) node.classList.remove(showcaseComposerClass);
     }});
     const composer = findComposer(home);
-    composer?.classList?.add(showcaseComposerClass);
-    if (composer instanceof HTMLElement) composer.dataset.codexThemeNativeComposer = "true";
-    document.documentElement.dataset.codexCompassShowcase = config.id;
+    setClassState(composer, showcaseComposerClass, true);
+    setDatasetValue(composer, "codexThemeNativeComposer", "true");
+    setDatasetValue(document.documentElement, "codexCompassShowcase", config.id);
     return true;
   }}
   let syncTimer = 0;
@@ -3978,10 +5809,23 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
   }}
   const observer = new MutationObserver(() => {{
     if (!document.getElementById(styleId)) document.documentElement.appendChild(style);
-    document.documentElement.dataset.codexCompassTheme = config.id;
+    setDatasetValue(document.documentElement, "codexCompassTheme", config.id);
     scheduleShowcaseSync();
   }});
   observer.observe(document.documentElement, {{ childList: true, subtree: true }});
+  const appearanceObserver = new MutationObserver(() => scheduleAppearanceSync());
+  appearanceObserver.observe(document.documentElement, {{
+    attributes: true,
+    attributeFilter: ["class", "data-theme", "color-scheme"],
+  }});
+  if (document.body) {{
+    appearanceObserver.observe(document.body, {{
+      attributes: true,
+      attributeFilter: ["class", "data-theme"],
+    }});
+  }}
+  document.addEventListener("click", handleProjectArchiveClick, true);
+  scheduleAppearanceSync(0);
   syncShowcase();
   window[runtimeKey] = {{
     status: "loaded",
@@ -3992,7 +5836,13 @@ pub fn build_runtime_bundle(settings: &ThemeStudioSettings) -> anyhow::Result<St
     syncShell: () => decorateCodexShell(findHomeSurface()),
     cleanup: () => {{
       observer.disconnect();
+      appearanceObserver.disconnect();
       if (syncTimer) window.clearTimeout(syncTimer);
+      if (appearanceSyncTimer) window.clearTimeout(appearanceSyncTimer);
+      document.removeEventListener("click", handleProjectArchiveClick, true);
+      projectArchiveCleanupTimers.forEach((timer) => window.clearTimeout(timer));
+      projectArchiveCleanupTimers.clear();
+      document.removeEventListener("wheel", forwardSidebarRowWheel, true);
       style.remove();
       clearShowcaseDom();
       clearShellDom();
@@ -4041,6 +5891,80 @@ mod tests {
     use std::io::Write;
     use zip::write::SimpleFileOptions;
 
+    #[test]
+    fn manager_persists_images_outside_settings_json() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager = ThemeStudioManager::new(temp.path().join("theme-studio"));
+        let mut settings = ThemeStudioSettings::default();
+        settings.themes[0].wallpaper_data_url = "data:image/png;base64,cHJlc2VydmVk".to_string();
+
+        manager.save(settings).unwrap();
+
+        let stored = fs::read_to_string(&manager.settings_path).unwrap();
+        assert!(!stored.contains("data:image"));
+        assert!(
+            manager
+                .assets_path
+                .join("rose-garden")
+                .join("wallpaper.png")
+                .is_file()
+        );
+        let loaded = manager.try_load().unwrap();
+        assert_eq!(
+            loaded.themes[0].wallpaper_data_url,
+            "data:image/png;base64,cHJlc2VydmVk"
+        );
+    }
+
+    #[test]
+    fn manager_migrates_embedded_images_during_load() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager = ThemeStudioManager::new(temp.path().join("theme-studio"));
+        fs::create_dir_all(&manager.root).unwrap();
+        let mut settings = ThemeStudioSettings::default();
+        settings.themes[0].wallpaper_data_url = "data:image/png;base64,bGVnYWN5".to_string();
+        fs::write(
+            &manager.settings_path,
+            serde_json::to_vec_pretty(&settings).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = manager.try_load().unwrap();
+
+        assert_eq!(
+            loaded.themes[0].wallpaper_data_url,
+            "data:image/png;base64,bGVnYWN5"
+        );
+        let stored = fs::read_to_string(&manager.settings_path).unwrap();
+        assert!(!stored.contains("data:image"));
+        assert!(
+            manager
+                .assets_path
+                .join("rose-garden")
+                .join("wallpaper.png")
+                .is_file()
+        );
+    }
+
+    #[test]
+    fn deleting_theme_removes_its_asset_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager = ThemeStudioManager::new(temp.path().join("theme-studio"));
+        let mut settings = ThemeStudioSettings::default();
+        let mut custom = settings.themes[0].clone();
+        custom.id = "custom-cleanup".to_string();
+        custom.builtin = false;
+        custom.wallpaper_data_url = "data:image/png;base64,Y3VzdG9t".to_string();
+        settings.themes.push(custom);
+        manager.save(settings).unwrap();
+        let custom_assets = manager.assets_path.join("custom-cleanup");
+        assert!(custom_assets.is_dir());
+
+        manager.delete_theme("custom-cleanup").unwrap();
+
+        assert!(!custom_assets.exists());
+    }
+
     fn legacy_v2_settings() -> ThemeStudioSettings {
         ThemeStudioSettings {
             schema_version: 2,
@@ -4072,6 +5996,53 @@ mod tests {
             .map(|theme| theme.id.as_str())
             .collect::<HashSet<_>>();
         assert_eq!(ids.len(), 8);
+    }
+
+    #[test]
+    fn title_bar_text_color_tracks_theme_brightness() {
+        let mut settings = ThemeStudioSettings::default();
+        assert_eq!(
+            theme_title_bar_text_color(&settings),
+            ThemeTitleBarTextColor::Default
+        );
+
+        settings.enabled = true;
+        settings.themes[0].visual.background = "#ffffff".to_string();
+        assert_eq!(
+            theme_title_bar_text_color(&settings),
+            ThemeTitleBarTextColor::Black
+        );
+
+        settings.themes[0].visual.background = "#080918".to_string();
+        assert_eq!(
+            theme_title_bar_text_color(&settings),
+            ThemeTitleBarTextColor::White
+        );
+    }
+
+    #[test]
+    fn title_bar_text_color_falls_back_to_surface_then_text() {
+        let mut settings = ThemeStudioSettings::default();
+        settings.enabled = true;
+
+        // Empty/unparseable background must not strand the buttons on Default.
+        settings.themes[0].visual.background = String::new();
+        settings.themes[0].visual.surface = "#fffef8".to_string();
+        settings.themes[0].visual.text = "#24302d".to_string();
+        assert_eq!(
+            theme_title_bar_text_color(&settings),
+            ThemeTitleBarTextColor::Black,
+            "light surface should request dark caption buttons"
+        );
+
+        // No background and no surface: infer from a light text color (dark window).
+        settings.themes[0].visual.surface = String::new();
+        settings.themes[0].visual.text = "#f4f4f4".to_string();
+        assert_eq!(
+            theme_title_bar_text_color(&settings),
+            ThemeTitleBarTextColor::White,
+            "light text implies a dark window that needs light caption buttons"
+        );
     }
 
     #[test]
@@ -4188,7 +6159,7 @@ mod tests {
             .iter()
             .find(|theme| theme.id == "rose-garden")
             .unwrap();
-        assert_eq!(theme.version, "2.0.0");
+        assert_eq!(theme.version, "2.1.0");
         assert_eq!(theme.showcase.title, "我们该构建什么？");
         assert!(theme.showcase.hero_image_data_url.is_empty());
         assert_eq!(theme.presentation.layout_style, "editorial");
@@ -4216,7 +6187,7 @@ mod tests {
             .unwrap();
         assert!(theme.showcase.hero_image_data_url.is_empty());
         assert_eq!(theme.showcase.title, "我的自定义标题");
-        assert_eq!(theme.version, "2.0.0");
+        assert_eq!(theme.version, "2.1.0");
     }
 
     #[test]
@@ -4236,16 +6207,101 @@ mod tests {
         assert!(bundle.contains("fillComposer"));
         assert!(bundle.contains("[data-testid=\"home-icon\"]"));
         assert!(bundle.contains("cc-theme-shell-sidebar"));
+        assert!(bundle.contains("cc-theme-shell-sidebar-static"));
+        assert!(bundle.contains("cc-theme-shell-account-static"));
+        assert!(bundle.contains("cc-theme-shell-search-button"));
+        assert!(bundle.contains("cc-theme-shell-window-control"));
+        assert!(bundle.contains("cc-theme-shell-window-close"));
         assert!(bundle.contains("[data-app-action-sidebar-project-row]"));
         assert!(bundle.contains("[data-app-action-sidebar-thread-row]"));
         assert!(bundle.contains("[data-codex-intelligence-trigger=\"true\"]"));
+        assert!(bundle.contains("[data-slot=\"dialog-overlay\"]"));
+        assert!(bundle.contains("[data-slot=\"alert-dialog-overlay\"]"));
+        assert!(bundle.contains("[data-slot=\"popover-content\"]"));
+        assert!(bundle.contains("[role=\"switch\"][aria-checked=\"true\"]"));
+        assert!(bundle.contains("background: var(--cc-theme-surface)"));
         assert!(bundle.contains("syncClassMembers"));
         assert!(bundle.contains("clearShellDom"));
         assert!(bundle.contains("cc-theme-showcase-card-description"));
         assert!(bundle.contains("cc-theme-showcase-brandline"));
         assert!(bundle.contains("cc-theme-showcase-companion"));
         assert!(bundle.contains("cc-theme-shell-stop-button"));
+        assert!(bundle.contains("cc-theme-enfp-mode"));
+        assert!(bundle.contains("cc-theme-enfp-bubbles"));
+        assert!(bundle.contains("ENFP 能量值"));
+        assert!(bundle.contains("cc-theme-shell-nav-violet"));
+        assert!(bundle.contains("cc-theme-shell-window-minimize"));
+        assert!(bundle.contains("[data-window-action]"));
+        assert!(bundle.contains("app.appearance.set_mode"));
+        assert!(bundle.contains("mode: colorScheme"));
+        assert!(bundle.contains("appearanceObserver"));
+        assert!(bundle.contains("[role=\"dialog\"][aria-label=\"图片预览\"] *"));
+        assert!(bundle.contains("[role=\"dialog\"][aria-label=\"Image preview\"] *"));
+        assert!(bundle.contains("decorateProjectContextUi"));
+        assert!(bundle.contains("data-codex-theme-project-context-menu"));
+        assert!(bundle.contains("data-codex-theme-project-rename-dialog"));
+        assert!(bundle.contains("data-codex-theme-project-menu-action=\"archive\""));
+        assert!(bundle.contains("handleProjectArchiveClick"));
+        assert!(bundle.contains("visibleProjectArchiveConfirmation"));
+        assert!(bundle.contains("top: 50% !important"));
+        assert!(bundle.contains("transform: translate(-50%, -50%) !important"));
+        assert!(!bundle.contains("top: 88px !important"));
+        assert!(!bundle.contains("linear-gradient(45deg, transparent 44%"));
+        assert!(!bundle.contains("item.top <= 74"));
+        assert!(!bundle.contains("window.innerWidth - 240"));
+        assert!(bundle.contains("linear-gradient(90deg, #ef765d"));
         assert!(!bundle.contains("https://"));
+    }
+
+    #[test]
+    fn enfp_v2_1_defaults_upgrade_without_losing_customizations() {
+        let mut settings = ThemeStudioSettings {
+            schema_version: THEME_SCHEMA_VERSION,
+            enabled: true,
+            selected_theme_id: "enfp-doodle".to_string(),
+            themes: legacy_builtin_themes_v3_1(),
+            updated_at: unix_timestamp_string(),
+        };
+        let theme = settings
+            .themes
+            .iter_mut()
+            .find(|theme| theme.id == "enfp-doodle")
+            .unwrap();
+        let old_wallpaper = theme.wallpaper_data_url.clone();
+        theme.showcase.title = "保留我的 ENFP 标题".to_string();
+        theme.visual.accent = "#123456".to_string();
+
+        let normalized = normalize_settings(settings).unwrap();
+        let theme = normalized
+            .themes
+            .iter()
+            .find(|theme| theme.id == "enfp-doodle")
+            .unwrap();
+        assert_eq!(theme.version, "2.2.0");
+        assert_eq!(theme.showcase.title, "保留我的 ENFP 标题");
+        assert_eq!(theme.visual.accent, "#123456");
+        assert_eq!(theme.presentation.header_badge, "好点子 +99");
+        assert_eq!(theme.presentation.task_wallpaper_opacity, 5);
+        assert_ne!(theme.wallpaper_data_url, old_wallpaper);
+        assert!(
+            theme.showcase.cards[0]
+                .prompt
+                .starts_with("把脑子里的一万种可能")
+        );
+    }
+
+    #[test]
+    fn enfp_runtime_bundle_contains_real_concept_components() {
+        let mut settings = ThemeStudioSettings::default();
+        settings.enabled = true;
+        settings.selected_theme_id = "enfp-doodle".to_string();
+        let bundle = build_runtime_bundle(&settings).unwrap();
+        assert!(bundle.contains("theme-enfp-doodle"));
+        assert!(bundle.contains("今天适合开脑洞"));
+        assert!(bundle.contains("专属皮肤 · ENFP"));
+        assert!(bundle.contains("今日心情卡"));
+        assert!(bundle.contains("# 自由探索"));
+        assert!(bundle.contains("把脑子里的一万种可能都倒出来"));
     }
 
     #[test]

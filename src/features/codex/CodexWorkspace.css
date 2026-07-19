@@ -107,17 +107,26 @@
   background: var(--danger-bg);
 }
 
+.codex-notice-viewport {
+  position: fixed;
+  z-index: 900;
+  top: 64px;
+  left: 50%;
+  width: min(720px, calc(100vw - 32px));
+  display: grid;
+  gap: 8px;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
 .codex-notice {
-  position: sticky;
-  z-index: 8;
-  top: 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  width: min(720px, calc(100% - 32px));
+  width: 100%;
   min-height: 48px;
-  margin: 0 auto 12px;
+  margin: 0;
   padding: 11px 14px;
   box-sizing: border-box;
   border: 1px solid var(--border);
@@ -125,6 +134,7 @@
   background: var(--bg-modal);
   backdrop-filter: var(--glass-blur);
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+  pointer-events: auto;
 }
 
 .codex-notice > span {

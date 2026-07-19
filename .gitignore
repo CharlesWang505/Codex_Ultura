@@ -16,6 +16,7 @@ release
 output
 tmp
 .codex-build
+.public-build
 src-tauri/target
 sensitive
 *.local

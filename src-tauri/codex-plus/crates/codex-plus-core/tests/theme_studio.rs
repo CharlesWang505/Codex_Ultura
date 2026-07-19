@@ -34,9 +34,14 @@ fn default_library_uses_schema_v3_and_eight_unique_presentations() {
 
     for theme in &settings.themes {
         assert!(theme.builtin, "{} should remain a built-in theme", theme.id);
+        let expected_version = if theme.id == "enfp-doodle" {
+            "2.2.0"
+        } else {
+            "2.1.0"
+        };
         assert_eq!(
-            theme.version, "2.1.0",
-            "{} should use the matched-copy preset version",
+            theme.version, expected_version,
+            "{} should use its current built-in preset version",
             theme.id
         );
         assert!(
@@ -147,7 +152,7 @@ fn default_library_copy_matches_each_visual_concept() {
             "enfp-doodle",
             "ENFP 灵感宇宙",
             "先有灵感，再把它变成真的",
-            "ENERGY 100%",
+            "好点子 +99",
             "灵感脑暴",
         ),
         (
@@ -308,11 +313,11 @@ fn runtime_bundle_preserves_codex_annotation_overlay_and_readability() {
     assert!(
         bundle.contains("background: color-mix(in srgb, var(--cc-theme-bg) 72%, transparent);")
     );
-    assert!(
-        bundle.contains("document.documentElement.dataset.codexCompassThemePage = \"thread\";")
-    );
     assert!(bundle.contains(
-        "document.documentElement.dataset.codexCompassTaskMode = p.taskMode || \"ambient\";"
+        "setDatasetValue(document.documentElement, \"codexCompassThemePage\", \"thread\");"
+    ));
+    assert!(bundle.contains(
+        "setDatasetValue(document.documentElement, \"codexCompassTaskMode\", p.taskMode || \"ambient\");"
     ));
     assert!(!bundle.contains("[class*=\"modal\"]"));
     assert!(!bundle.contains("[class*=\"popover\"]"));

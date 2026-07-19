@@ -112,12 +112,12 @@ const ENHANCEMENT_TOGGLES: Array<[keyof BackendSettings, string, string]> = [
   ['codexAppThreadIdBadge', '任务 ID 标记', '在任务界面显示线程 ID。'],
   ['codexAppConversationView', '会话视图增强', '启用增强的会话展示模式。'],
   ['codexAppThreadScrollRestore', '滚动位置恢复', '重新打开任务时恢复阅读位置。'],
-  ['codexAppUpstreamWorktreeCreate', 'Worktree 创建', '启用上游工作树创建入口。'],
+  ['codexAppUpstreamWorktreeCreate', '工作树创建', '启用上游工作树创建入口。'],
   ['codexAppNativeMenuPlacement', '原生菜单布局', '优化桌面端原生菜单位置。'],
   ['codexAppNativeMenuLocalization', '原生菜单中文化', '翻译桌面端原生菜单。'],
-  ['codexAppServiceTierControls', 'Service Tier 控制', '显示服务等级相关控制项。'],
-  ['computerUseGuardEnabled', 'Computer Use 防护', '为计算机控制能力增加安全检查。'],
-  ['codexGoalsEnabled', 'Goals 实验功能', '启用 Codex Goals 实验能力。'],
+  ['codexAppServiceTierControls', '服务等级控制', '显示服务等级相关控制项。'],
+  ['computerUseGuardEnabled', '计算机操作防护', '为计算机控制能力增加安全检查。'],
+  ['codexGoalsEnabled', '目标实验功能', '启用 Codex 目标实验能力。'],
 ]
 
 function createId(prefix: string) {
@@ -1020,8 +1020,8 @@ export function CodexWorkspace({ section }: Props) {
             <div className="codex-switch-row codex-feature-master-switch"><div><strong>启用 Codex 增强</strong><span>作为全部增强能力的总开关；关闭不会清除下方单项配置。</span></div><button className={settings.enhancementsEnabled ? 'toggle on' : 'toggle'} type="button" onClick={() => patchSettings({ enhancementsEnabled: !settings.enhancementsEnabled })}><span /></button></div>
             <div className="codex-toggle-grid">{ENHANCEMENT_TOGGLES.map(([key, title, description]) => <div key={String(key)} className="codex-switch-row"><div><strong>{title}</strong><span>{description}</span></div><button className={settings[key] ? 'toggle on' : 'toggle'} type="button" onClick={() => patchSettings({ [key]: !settings[key] } as Partial<BackendSettings>)}><span /></button></div>)}</div>
           </Panel>
-          <Panel title="Stepwise 分步处理" icon={<Activity size={18} />}>
-            <div className="codex-switch-row"><div><strong>启用 Stepwise</strong><span>将长任务按步骤交给指定模型处理。</span></div><button className={settings.codexAppStepwiseEnabled ? 'toggle on' : 'toggle'} type="button" onClick={() => patchSettings({ codexAppStepwiseEnabled: !settings.codexAppStepwiseEnabled })}><span /></button></div>
+          <Panel title="分步处理" icon={<Activity size={18} />}>
+            <div className="codex-switch-row"><div><strong>启用分步处理</strong><span>将长任务按步骤交给指定模型处理。</span></div><button className={settings.codexAppStepwiseEnabled ? 'toggle on' : 'toggle'} type="button" onClick={() => patchSettings({ codexAppStepwiseEnabled: !settings.codexAppStepwiseEnabled })}><span /></button></div>
             <div className="codex-switch-row"><div><strong>处理完成后直接发送</strong><span>关闭时仅填入结果，保留给你确认后再发送。</span></div><button className={settings.codexAppStepwiseDirectSend ? 'toggle on' : 'toggle'} type="button" onClick={() => patchSettings({ codexAppStepwiseDirectSend: !settings.codexAppStepwiseDirectSend })}><span /></button></div>
             <div className="codex-form-grid">
               <Field label="Base URL"><input value={settings.codexAppStepwiseBaseUrl} onChange={(event) => patchSettings({ codexAppStepwiseBaseUrl: event.target.value })} /></Field>
@@ -1033,7 +1033,7 @@ export function CodexWorkspace({ section }: Props) {
               <Field label="最大输出 Token"><input type="number" min={1} value={settings.codexAppStepwiseMaxOutputTokens} onChange={(event) => patchSettings({ codexAppStepwiseMaxOutputTokens: Number(event.target.value) })} /></Field>
               <Field label="超时（ms）"><input type="number" value={settings.codexAppStepwiseTimeoutMs} onChange={(event) => patchSettings({ codexAppStepwiseTimeoutMs: Number(event.target.value) })} /></Field>
             </div>
-            <div className="codex-toolbar"><LoadingButton busy={busy === 'test_stepwise_settings'} onClick={() => void runSimple('test_stepwise_settings', { settings })}><Activity size={14} />测试 Stepwise</LoadingButton><LoadingButton busy={busy === 'save-settings'} onClick={() => void saveSettings(settings)}><Save size={14} />保存设置</LoadingButton></div>
+            <div className="codex-toolbar"><LoadingButton busy={busy === 'test_stepwise_settings'} onClick={() => void runSimple('test_stepwise_settings', { settings })}><Activity size={14} />测试分步处理</LoadingButton><LoadingButton busy={busy === 'save-settings'} onClick={() => void saveSettings(settings)}><Save size={14} />保存设置</LoadingButton></div>
           </Panel>
           <Panel title="图片覆盖层" icon={<Sparkles size={18} />}>
             <div className="codex-switch-row"><div><strong>启用图片覆盖</strong><span>在 Codex 客户端背景中显示指定图片。</span></div><button className={settings.codexAppImageOverlayEnabled ? 'toggle on' : 'toggle'} type="button" onClick={() => patchSettings({ codexAppImageOverlayEnabled: !settings.codexAppImageOverlayEnabled })}><span /></button></div>
@@ -1077,9 +1077,15 @@ export function CodexWorkspace({ section }: Props) {
           </div>
           <Panel title="更新与诊断" icon={<Wrench size={18} />}>
             <p className="codex-result-text">更新源已连接到 GitHub Releases：CharlesWang505/Codex_Ultura。只会识别并下载该仓库发布的 Codex Compass 安装包。</p>
-            <div className="codex-toolbar"><LoadingButton busy={busy === 'check_update'} onClick={() => void run('check_update', () => callCodex<UpdateResult>('check_update')).then((result) => { if (result) { setUpdate(result); setNotice(noticeFrom(result)) } })}><RefreshCw size={14} />检查更新</LoadingButton><LoadingButton busy={busy === 'perform_update'} disabled={!update?.updateAvailable || !update.latestVersion || !update.assetUrl} onClick={() => update?.latestVersion && void run('perform_update', () => callCodex<UpdateResult>('perform_update', { release: { version: update.latestVersion, url: '', body: update.releaseSummary ?? '', asset_name: update.assetName ?? null, asset_url: update.assetUrl ?? null } })).then((result) => { if (result) { setUpdate(result); setNotice(noticeFrom(result)) } })}>下载安装</LoadingButton><LoadingButton busy={busy === 'read_latest_logs'} onClick={() => void run('read_latest_logs', () => callCodex<LogsResult>('read_latest_logs', { request: { lines: 240 } })).then((result) => result && setLogs(result))}>读取日志</LoadingButton><LoadingButton busy={busy === 'copy_diagnostics'} onClick={() => void run('copy_diagnostics', () => callCodex<DiagnosticsResult>('copy_diagnostics')).then((result) => { if (result) { setDiagnostics(result); setNotice(noticeFrom(result)) } })}>复制诊断</LoadingButton></div>
+            <div className="codex-toolbar">
+              <LoadingButton busy={busy === 'check_update'} onClick={() => void run('check_update', () => callCodex<UpdateResult>('check_update')).then((result) => { if (result) { setUpdate(result); setNotice(noticeFrom(result)) } })}><RefreshCw size={14} />检查更新</LoadingButton>
+              <LoadingButton busy={busy === 'perform_update'} disabled={!update?.updateAvailable || !update.latestVersion || !update.assetUrl} onClick={() => update?.latestVersion && void run('perform_update', () => callCodex<UpdateResult>('perform_update', { release: { version: update.latestVersion, url: '', body: update.releaseSummary ?? '', asset_name: update.assetName ?? null, asset_url: update.assetUrl ?? null } })).then((result) => { if (result) { setUpdate(result); setNotice(noticeFrom(result)) } })}>下载安装</LoadingButton>
+              <LoadingButton busy={busy === 'read_latest_logs'} onClick={() => void run('read_latest_logs', () => callCodex<LogsResult>('read_latest_logs', { request: { lines: 240 } })).then((result) => result && setLogs(result))}>读取日志</LoadingButton>
+              <LoadingButton busy={busy === 'clear_logs'} className="danger" onClick={() => void run('clear_logs', () => callCodex<LogsResult>('clear_logs')).then((result) => result && setLogs(result))}><Trash2 size={14} />清理日志</LoadingButton>
+              <LoadingButton busy={busy === 'copy_diagnostics'} onClick={() => void run('copy_diagnostics', () => callCodex<DiagnosticsResult>('copy_diagnostics')).then((result) => { if (result) { setDiagnostics(result); setNotice(noticeFrom(result)) } })}>复制诊断</LoadingButton>
+            </div>
             {update ? <p className="codex-result-text">当前 {update.currentVersion}，最新 {update.latestVersion ?? '未知'}。{update.releaseSummary ?? ''}</p> : null}
-            {logs ? <textarea className="codex-log-output" readOnly rows={12} value={logs.text} /> : null}
+            {logs ? <><p className="codex-result-text">日志文件：{logs.fileSize} 字节{logs.truncated ? '；当前仅显示文件尾部' : ''}</p><textarea className="codex-log-output" readOnly rows={12} value={logs.text} /></> : null}
             {diagnostics ? <textarea className="codex-log-output" readOnly rows={8} value={diagnostics.report} /> : null}
           </Panel>
         </div>

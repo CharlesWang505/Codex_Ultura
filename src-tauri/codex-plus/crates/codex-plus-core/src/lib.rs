@@ -33,6 +33,7 @@ pub mod script_market;
 pub mod settings;
 pub mod status;
 pub mod stepwise;
+pub mod theme_market;
 pub mod theme_studio;
 pub mod update;
 pub mod upstream_worktree;
@@ -70,6 +71,14 @@ pub fn windows_apply_codexplusplus_icon_to_process_window(
     icon_resource_path: std::path::PathBuf,
 ) -> bool {
     windows_integration::apply_codexplusplus_icon_to_process_window(process_id, icon_resource_path)
+}
+
+#[cfg(windows)]
+pub fn windows_apply_codex_title_bar_text_color_to_process_window(
+    process_id: u32,
+    color: theme_studio::ThemeTitleBarTextColor,
+) -> bool {
+    windows_integration::apply_codex_title_bar_text_color_to_process_window(process_id, color)
 }
 
 #[cfg(windows)]

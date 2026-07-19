@@ -6,6 +6,7 @@ Generated runtime wallpaper set (8 files)
 - butterfly-cosmos-wallpaper.webp
 - cyan-virtual-stage-wallpaper.webp
 - enfp-doodle-wallpaper.webp
+- enfp-doodle-wallpaper-v2-1.webp (migration baseline only)
 - fortune-workbench-wallpaper.webp
 - red-future-city-wallpaper.webp
 - rose-editorial-wallpaper.webp
@@ -13,7 +14,9 @@ Generated runtime wallpaper set (8 files)
 
 Source: generated with the built-in Image Generation tool for Codex Compass.
 Content: original fictional adult characters or original scenes.
-Processing: cropped, resized, and compressed to WebP for runtime use.
+Processing: cropped, resized, and compressed to WebP for runtime use. The active
+ENFP wallpaper is framed at 2560x1440 with a low-detail left safe area; the
+v2-1 copy is retained only to migrate unmodified local defaults safely.
 
 The concept screenshots and images from the referenced third-party repositories
 were used only as visual references. They were not copied, bundled, or used as
