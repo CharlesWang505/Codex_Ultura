@@ -383,6 +383,8 @@ pub struct BackendSettings {
     pub active_aggregate_relay_id: String,
     #[serde(rename = "relayTestModel", default = "default_relay_test_model")]
     pub relay_test_model: String,
+    #[serde(rename = "modelHealthCheckEnabled", default)]
+    pub model_health_check_enabled: bool,
     #[serde(rename = "floatingSwitchEnabled", default)]
     pub floating_switch_enabled: bool,
     #[serde(rename = "floatingSwitchPosition", default)]
@@ -451,6 +453,7 @@ impl Default for BackendSettings {
             aggregate_relay_profiles: Vec::new(),
             active_aggregate_relay_id: String::new(),
             relay_test_model: default_relay_test_model(),
+            model_health_check_enabled: false,
             floating_switch_enabled: false,
             floating_switch_position: None,
             default_reasoning: default_reasoning(),
@@ -1224,6 +1227,7 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
             }),
         );
     }
+    merge_bool_setting(target, source, "modelHealthCheckEnabled");
 }
 
 fn merge_bool_setting(target: &mut Map<String, Value>, source: &Map<String, Value>, key: &str) {
